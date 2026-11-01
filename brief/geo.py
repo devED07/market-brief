@@ -11,6 +11,7 @@ support gold as a safe haven and weigh on stocks.
 
 import json
 import statistics
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -42,8 +43,14 @@ def _parse_date(text: str) -> datetime | None:
 
 
 def _download() -> list[tuple[datetime, float]]:
-    resp = requests.get(API, params={"query": QUERY, "mode": "timelinevol", "format": "json",
-                                     "timespan": "30d"}, headers=HEADERS, timeout=30)
+    # GDELT allows one request every 5 seconds per IP address. GitHub's
+    # machines share IP addresses with other users, so wait and retry.
+    for wait in (0, 6, 10, 15):
+        time.sleep(wait)
+        resp = requests.get(API, params={"query": QUERY, "mode": "timelinevol", "format": "json",
+                                         "timespan": "30d"}, headers=HEADERS, timeout=30)
+        if resp.status_code != 429:
+            break
     resp.raise_for_status()
     data = resp.json()
     points = []
@@ -82,7 +89,7 @@ def fetch(now: datetime) -> tuple[dict | None, str]:
         detail = exc.__class__.__name__
         resp = getattr(exc, "response", None)
         if resp is not None:
-            detail += f" {resp.status_code}: {resp.text[:150].strip()}"
+            detail += f" {resp.status_code}" + (", busy" if resp.status_code == 429 else f": {resp.text[:120].strip()}")
         problem = f"GDELT didn't respond ({detail})"
         try:
             cached = json.loads(CACHE_FILE.read_text(encoding="utf-8"))

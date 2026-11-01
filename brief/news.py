@@ -3,6 +3,7 @@ keyword rules so you can see why the headline tone leans one way."""
 
 import json
 import re
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -108,7 +109,11 @@ def _fetch_query(q: str) -> list[dict]:
         + quote_plus(q + " when:1d")
         + "&hl=en-US&gl=US&ceid=US:en"
     )
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    for wait in (0, 5):  # Google sometimes turns away GitHub's shared machines briefly
+        time.sleep(wait)
+        resp = requests.get(url, headers=HEADERS, timeout=20)
+        if resp.status_code not in (429, 503):
+            break
     resp.raise_for_status()
     root = ET.fromstring(resp.content)
     items = []

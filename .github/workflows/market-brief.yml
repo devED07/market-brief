@@ -1,0 +1,59 @@
+name: Market Brief
+
+on:
+  schedule:
+    # GitHub cron times are in UTC. Runs start at :07 and :37 because the top
+    # of the hour is GitHub's busiest time and runs get delayed there.
+    #
+    # Weekdays (UTC): every 30 minutes.
+    - cron: "7,37 * * * 1-5"
+    # Saturday: every 3 hours while markets are shut.
+    - cron: "7 */3 * * 6"
+    # Sunday: every 3 hours, then every 30 minutes from 21:00 UTC,
+    # when gold and Dow futures reopen (Monday morning in Manila).
+    - cron: "7 0-18/3 * * 0"
+    - cron: "7,37 21-23 * * 0"
+  # Lets you start an update by hand from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: write   # publish the dashboard to the gh-pages branch
+  actions: write    # keep this schedule from switching itself off
+
+# One update at a time. A run that stays on around a big release makes the
+# next scheduled run wait instead of doubling up.
+concurrency:
+  group: market-brief
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 190
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Update the dashboard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: python main.py --hosted
+
+      # GitHub switches off schedules in public repos after 60 days without
+      # activity. Re-enabling it on each run keeps it going.
+      - name: Keep the schedule switched on
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/market-brief.yml/enable" --silent

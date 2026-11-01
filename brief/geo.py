@@ -79,7 +79,11 @@ def fetch(now: datetime) -> tuple[dict | None, str]:
         CACHE_FILE.write_text(json.dumps(summary), encoding="utf-8")
         return summary, ""
     except Exception as exc:
-        problem = f"GDELT didn't respond ({exc.__class__.__name__})"
+        detail = exc.__class__.__name__
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            detail += f" {resp.status_code}: {resp.text[:150].strip()}"
+        problem = f"GDELT didn't respond ({detail})"
         try:
             cached = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
             if now - datetime.fromisoformat(cached["time"]) < timedelta(hours=CACHE_MAX_AGE_H):

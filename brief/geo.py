@@ -52,7 +52,10 @@ def _download() -> list[tuple[datetime, float]]:
         if resp.status_code != 429:
             break
     resp.raise_for_status()
-    data = resp.json()
+    try:
+        data = resp.json()
+    except ValueError:
+        raise ValueError(f"not JSON: {resp.text[:160].strip()}") from None
     points = []
     for series in data.get("timeline", []):
         for p in series.get("data", []):
@@ -87,6 +90,8 @@ def fetch(now: datetime) -> tuple[dict | None, str]:
         return summary, ""
     except Exception as exc:
         detail = exc.__class__.__name__
+        if isinstance(exc, ValueError):
+            detail += f": {str(exc)[:200]}"
         resp = getattr(exc, "response", None)
         if resp is not None:
             detail += f" {resp.status_code}" + (", busy" if resp.status_code == 429 else f": {resp.text[:120].strip()}")

@@ -65,9 +65,13 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         sub = series.loc[:t]
         return float(sub.iloc[-1]) if not sub.empty else None
 
+    week = series.loc[pd.Timestamp(last_time - timedelta(days=5)):]
+    avg_5d = float(week.mean()) if len(week) > 50 else None
+
     return {
         "last": last,
         "last_time": last_time,
+        "vs_5d": pct(avg_5d, last),
         "stale_min": int((now - last_time).total_seconds() // 60),
         "chg_30m": pct(ago(30), last),
         "chg_4h": pct(ago(240), last),

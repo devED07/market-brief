@@ -45,8 +45,8 @@ def send(settings, text: str) -> str | None:
 def _summary(brief: dict, tz) -> str:
     g, u = brief["bias"]["gold"], brief["bias"]["us30"]
     lines = [
-        f"<b>Gold</b>: {g['label']} ({g['score']:+.1f})",
-        f"<b>US30</b>: {u['label']} ({u['score']:+.1f})",
+        f"<b>Gold</b>: {g['label']} ({g['score']:+.1f})" + (", price disagrees" if g.get("warning") else ""),
+        f"<b>US30</b>: {u['label']} ({u['score']:+.1f})" + (", price disagrees" if u.get("warning") else ""),
     ]
     nxt = brief.get("next_release")
     if nxt:

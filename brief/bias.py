@@ -1,6 +1,6 @@
 """The bias engine. Plain rules, so you can always see why it says what it says.
 
-Four drivers feed both instruments, each turned into signed points:
+Five drivers feed each instrument, each turned into signed points:
 
 1. US data this week: for every big USD release, how did 10Y T-note futures
    and the dollar move in the 15 min after it (30-45 min for the Fed)?
@@ -9,9 +9,12 @@ Four drivers feed both instruments, each turned into signed points:
 2. Dollar and yields over the last 24h.
 3. Risk mood from the VIX (level and change).
 4. Headline tone from keyword tags.
+5. The instrument's own price trend (24h, 4h, and against its 5-day average).
 
 Hawkish / USD-up pressure is bearish for gold and for US30.
-Risk-off is bullish for gold (safe haven) and bearish for US30.
+Risk-off is bullish for gold (safe haven) and bearish for US30, except when
+gold is falling along with stocks: then it's selling everything, and fear
+isn't counted for gold.
 Score runs from -10 (strongly bearish) to +10 (strongly bullish).
 """
 
@@ -152,6 +155,54 @@ def risk_score(snaps: dict) -> tuple[float | None, str]:
     return clamp(score, -1.5, 1.5), f"{detail}; mood {mood}"
 
 
+# How big a move counts as one full point of trend (%), per instrument.
+TREND_SCALE = {
+    "gold": {"chg_24h": 1.5, "chg_4h": 0.6, "vs_5d": 2.0},
+    "us30": {"chg_24h": 1.0, "chg_4h": 0.4, "vs_5d": 1.5},
+}
+
+
+def price_trend(key: str, snaps: dict) -> tuple[float | None, str]:
+    """The instrument's own direction: last 24h, last 4h, and where it sits
+    against its 5-day average. Roughly -1.5 (falling hard) to +1.5."""
+    s = snaps.get(key)
+    if not s:
+        return None, "No price data"
+    parts = []
+    for field, w in (("chg_24h", 0.4), ("chg_4h", 0.3), ("vs_5d", 0.3)):
+        v = s.get(field)
+        if v is not None:
+            parts.append((w, clamp(v / TREND_SCALE[key][field], -1.5, 1.5)))
+    if not parts:
+        return None, "Not enough price history"
+    score = sum(w * x for w, x in parts) / sum(w for w, _ in parts)
+    bits = []
+    for field, label in (("chg_24h", "24h"), ("chg_4h", "4h")):
+        if s.get(field) is not None:
+            bits.append(f"{s[field]:+.1f}% in {label}")
+    v5 = s.get("vs_5d")
+    if v5 is not None:
+        bits.append("above its 5-day average" if v5 > 0.15 else
+                    "below its 5-day average" if v5 < -0.15 else "near its 5-day average")
+    return score, ", ".join(bits)
+
+
+def gold_risk(r: float, detail: str, snaps: dict) -> tuple[float, str]:
+    """Fear only counts as safe-haven buying if gold is actually holding up.
+    When gold falls along with stocks, traders are selling everything."""
+    if r < 0.2:  # calm or barely moving: nothing to second-guess
+        return r * 1.5, detail
+    g = snaps.get("gold", {}).get("chg_24h")
+    u = snaps.get("us30", {}).get("chg_24h")
+    if g is None:
+        return r * 1.5, detail
+    if g <= -0.5 and u is not None and u < 0:
+        return 0.0, detail + ". Gold fell with stocks, so it's selling everything, not safe-haven buying"
+    if g < -0.2:
+        return r * 0.75, detail + ". Gold is slipping, so only half counts"
+    return r * 1.5, detail
+
+
 # ---------------------------------------------------------------- instruments
 
 def _label(score: float) -> tuple[str, str]:
@@ -167,9 +218,19 @@ def _label(score: float) -> tuple[str, str]:
     return f"Strongly {side}", tone
 
 
-def _instrument(drivers: list[dict]) -> dict:
+def _instrument(name: str, drivers: list[dict], trend: dict) -> dict:
+    drivers = drivers + [trend]
     score = clamp(sum(d["points"] for d in drivers), -10.0, 10.0)
     label, tone = _label(score)
+
+    # Do the news and data point one way while price goes the other?
+    fundamentals = sum(d["points"] for d in drivers if d is not trend)
+    warning = ""
+    if abs(fundamentals) >= 1.5 and abs(trend["points"]) >= 0.8 and fundamentals * trend["points"] < 0:
+        side = "bullish" if fundamentals > 0 else "bearish"
+        move = "falling" if trend["points"] < 0 else "rising"
+        warning = (f"Price disagrees. The data and news lean {side}, but {name} has been {move} "
+                   f"({trend['detail']}). Let price confirm before leaning on this.")
     signs = {1 if d["points"] > 0 else -1 for d in drivers if abs(d["points"]) >= 0.5}
     if not signs:
         agreement = "Nothing is pushing hard either way"
@@ -177,7 +238,8 @@ def _instrument(drivers: list[dict]) -> dict:
         agreement = "Drivers agree"
     else:
         agreement = "Drivers are mixed, lower conviction"
-    return {"score": score, "label": label, "tone": tone, "drivers": drivers, "agreement": agreement}
+    return {"score": score, "label": label, "tone": tone, "drivers": drivers,
+            "agreement": agreement, "warning": warning}
 
 
 def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime) -> dict:
@@ -190,19 +252,22 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime)
                 f"{c['risk-off']} risk-off, {c['risk-on']} risk-on")
 
     d, t, r = d_score or 0.0, t_score or 0.0, r_score or 0.0
+    g_trend, g_trend_detail = price_trend("gold", snaps)
+    u_trend, u_trend_detail = price_trend("us30", snaps)
+    g_risk, g_risk_detail = gold_risk(r, r_detail, snaps)
 
-    gold = _instrument([
+    gold = _instrument("gold", [
         {"name": "US data this week", "points": -d * 2.0, "detail": d_detail},
         {"name": "Dollar and yields", "points": -t * 2.0, "detail": t_detail},
-        {"name": "Risk mood", "points": r * 1.5, "detail": r_detail},
+        {"name": "Risk mood", "points": g_risk, "detail": g_risk_detail},
         {"name": "Headlines", "points": -h["rates"] * 1.0 + h["risk"] * 1.0, "detail": h_detail},
-    ])
-    us30 = _instrument([
+    ], {"name": "Price trend", "points": (g_trend or 0.0) * 2.0, "detail": g_trend_detail})
+    us30 = _instrument("US30", [
         {"name": "US data this week", "points": -d * 1.5, "detail": d_detail},
         {"name": "Dollar and yields", "points": -t * 1.5, "detail": t_detail},
         {"name": "Risk mood", "points": -r * 2.5, "detail": r_detail},
         {"name": "Headlines", "points": -h["rates"] * 0.8 - h["risk"] * 1.2, "detail": h_detail},
-    ])
+    ], {"name": "Price trend", "points": (u_trend or 0.0) * 2.0, "detail": u_trend_detail})
     return {"gold": gold, "us30": us30,
             "components": {"data": d_score, "trend": t_score, "risk": r_score,
                            "headline_rates": h["rates"], "headline_risk": h["risk"]}}

@@ -60,6 +60,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
 .scale .pin{position:absolute;top:-4px;width:3px;height:18px;border-radius:2px;background:var(--text);transform:translateX(-1px)}
 .scale-ends{display:flex;justify-content:space-between;color:var(--faint);font-size:12px;margin-left:86px}
 .agree{color:var(--muted);font-size:13px;margin:8px 0 12px}
+.warn{margin:0 0 12px;padding:9px 12px;border-radius:5px;font-size:13px;line-height:1.45;
+  border:1px solid color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
 .drivers{width:100%;border-collapse:collapse;font-size:14px}
 .drivers td{padding:7px 0;border-top:1px solid var(--line);vertical-align:top}
 .drivers .dn{font-weight:600;padding-right:10px;white-space:nowrap}
@@ -304,6 +306,7 @@ def _instrument(key: str, name: str, symbol: str, data: dict) -> str:
   </div>
   <div class="scale-ends"><span>Bearish</span><span>Bullish</span></div>
   <div class="agree">{escape(data['agreement'])}</div>
+  {f'<p class="warn" role="note">{escape(data["warning"])}</p>' if data.get("warning") else ""}
   <table class="drivers">{''.join(rows)}</table>
 </article>"""
 
@@ -652,7 +655,7 @@ def render(brief: dict) -> str:
 
 <footer>
   {problems}
-  <p>Bias comes from fundamentals only: how big US releases moved yields and the dollar this week, the 24-hour dollar and yield trend, VIX, and headline tone. It doesn't look at your chart, so your setup still decides entries.</p>
+  <p>Bias combines how big US releases moved yields and the dollar this week, the 24-hour dollar and yield trend, VIX, headline tone, and each market's own recent trend. It doesn't read chart patterns or levels, so your setup still decides entries.</p>
   <p>Personal tool, not financial advice. Data: Forex Factory calendar feed, Yahoo Finance, Google News.</p>
 </footer>
 </div>

@@ -69,14 +69,17 @@ For phone alerts in this mode, fill in the `[telegram]` part of `settings.ini`. 
 
 ## D. Reading the dashboard
 
-The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it are the four drivers and how many points each one adds:
+The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it are the five drivers and how many points each one adds:
 
 | Driver | What it measures |
 |---|---|
 | US data this week | How yields and the dollar reacted in the first 15 minutes after each big US release. Yields and dollar up means hawkish, which is bad for gold and US30. Older releases count less (half weight after 3 days). |
 | Dollar and yields | The dollar and 10Y yields over the last 24 hours. |
-| Risk mood | VIX. Nervous markets help gold and hurt US30. |
+| Risk mood | VIX. Nervous markets hurt US30 and usually help gold. The exception is when gold falls along with stocks: that's traders selling everything, so fear isn't counted for gold. |
 | Headlines | Keyword tags on recent news. |
+| Price trend | The market's own direction: the last 24 hours, the last 4 hours, and where price sits against its 5-day average. |
+
+When the data and news point one way but price keeps going the other, the card shows a **Price disagrees** note. That's a sign to wait for price to confirm.
 
 "Drivers are mixed" means low conviction, so let your chart lead.
 

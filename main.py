@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from brief import bias as B
 from brief import calendar_feed as C
 from brief import dashboard as D
+from brief import geo as G
 from brief import leadup as L
 from brief import news as N
 from brief import prices as P
@@ -75,6 +76,7 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
             h["tags"] = N._tag(h["title"])
         snaps = {k: P.snapshot(s, now) for k, s in series.items()}
         clock_offset_ms = int((now - datetime.now(timezone.utc)).total_seconds() * 1000)
+        geo_summary = {"ratio": 1.3, "level": "elevated", "time": now.isoformat()}
     else:
         now = datetime.now(timezone.utc)
         rows, _fresh, note = C.load_raw()
@@ -95,6 +97,9 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
             N.save_cache(headlines)
         else:
             headlines = N.load_cache(now)
+        geo_summary, geo_problem = G.fetch(now)
+        if geo_problem:
+            problems.append(geo_problem)
         if news_problems and len(news_problems) == len(N.QUERIES):
             problems.append("Google News didn't respond")
             if hosted:
@@ -117,7 +122,8 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         "next_release": upcoming_high[0] if upcoming_high else None,
         "snaps": snaps,
         "headlines": headlines,
-        "bias": B.build(releases, snaps, N.tone(headlines), now),
+        "bias": B.build(releases, snaps, N.tone(headlines), now, G.score(geo_summary)),
+        "geo": geo_summary,
         "market": market,
         "night": B.sessions_for_night(now, tz, market),
         "leadups": leadups,
@@ -150,6 +156,9 @@ def print_summary(brief: dict, tz) -> None:
     if nxt:
         print(f"           Next big release: {nxt['headline']} at "
               f"{nxt['time'].astimezone(tz).strftime('%a')} {_hm(nxt['time'], tz)}")
+    geo = brief.get("geo")
+    if geo:
+        print(f"           Geopolitical tension: {geo['level']} ({geo['ratio']:.2f}x normal)")
     for p in brief["problems"]:
         print(f"  ! {p}")
 

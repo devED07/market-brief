@@ -34,16 +34,25 @@ TAGS = {
         "yields slide", "dollar falls", "dollar slips", "dollar weakens", "recession",
     ],
     "risk-off": [
-        "war", "missile", "attack", "escalat", "sanction", "tariff", "sell-off", "selloff",
+        "tariff", "sell-off", "selloff",
         "stocks fall", "stocks drop", "stocks slide", "stocks tumble", "stocks plunge",
         "dow falls", "dow drops", "dow slides", "dow tumbles", "dow sheds", "crisis",
-        "default", "bank run", "shutdown", "conflict", "safe haven", "safe-haven", "turmoil",
+        "default", "bank run", "shutdown", "safe haven", "safe-haven", "turmoil",
     ],
     "risk-on": [
-        "ceasefire", "truce", "deal reached", "trade deal", "agreement reached",
+        "deal reached", "trade deal", "agreement reached",
         "stocks rise", "stocks rally", "stocks climb", "stocks gain", "stocks hit record",
         "dow rises", "dow climbs", "dow gains", "dow rallies", "dow hits record",
-        "eases tensions", "tensions ease",
+    ],
+    # Shown on headlines for context. The Geopolitics driver itself comes from
+    # GDELT (geo.py), so these don't add to the headline score.
+    "geopolitics": [
+        "war", "missile", "attack", "airstrike", "air strike", "escalat", "sanction", "conflict",
+        "invasion", "invade", "troops", "nuclear", "terror", "drone strike",
+    ],
+    "de-escalation": [
+        "ceasefire", "truce", "peace talks", "peace deal", "eases tensions", "tensions ease",
+        "de-escalat",
     ],
 }
 

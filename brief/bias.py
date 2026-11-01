@@ -1,6 +1,6 @@
 """The bias engine. Plain rules, so you can always see why it says what it says.
 
-Five drivers feed each instrument, each turned into signed points:
+Six drivers feed each instrument, each turned into signed points:
 
 1. US data this week: for every big USD release, how did 10Y T-note futures
    and the dollar move in the 15 min after it (30-45 min for the Fed)?
@@ -9,7 +9,8 @@ Five drivers feed each instrument, each turned into signed points:
 2. Dollar and yields over the last 24h.
 3. Risk mood from the VIX (level and change).
 4. Headline tone from keyword tags.
-5. The instrument's own price trend (24h, 4h, and against its 5-day average).
+5. Geopolitical tension: conflict news vs its 30-day normal (GDELT, see geo.py).
+6. The instrument's own price trend (24h, 4h, and against its 5-day average).
 
 Hawkish / USD-up pressure is bearish for gold and for US30.
 Risk-off is bullish for gold (safe haven) and bearish for US30, except when
@@ -245,7 +246,8 @@ def _instrument(name: str, drivers: list[dict], trend: dict) -> dict:
             "agreement": agreement, "warning": warning}
 
 
-def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime) -> dict:
+def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
+          geo: tuple[float | None, str] = (None, "No geopolitical data this time")) -> dict:
     d_score, d_detail = data_score(releases, now)
     t_score, t_detail = trend_score(snaps)
     r_score, r_detail = risk_score(snaps)
@@ -258,18 +260,22 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime)
     g_trend, g_trend_detail = price_trend("gold", snaps)
     u_trend, u_trend_detail = price_trend("us30", snaps)
     g_risk, g_risk_detail = gold_risk(r, r_detail, snaps)
+    geo_s, geo_detail = geo
+    gs = geo_s or 0.0
 
     gold = _instrument("gold", [
         {"name": "US data this week", "points": -d * 2.0, "detail": d_detail},
         {"name": "Dollar and yields", "points": -t * 2.0, "detail": t_detail},
         {"name": "Risk mood", "points": g_risk, "detail": g_risk_detail},
         {"name": "Headlines", "points": -h["rates"] * 1.0 + h["risk"] * 1.0, "detail": h_detail},
+        {"name": "Geopolitics", "points": gs * 1.5, "detail": geo_detail},
     ], {"name": "Price trend", "points": (g_trend or 0.0) * 2.0, "detail": g_trend_detail})
     us30 = _instrument("US30", [
         {"name": "US data this week", "points": -d * 1.5, "detail": d_detail},
         {"name": "Dollar and yields", "points": -t * 1.5, "detail": t_detail},
         {"name": "Risk mood", "points": -r * 2.5, "detail": r_detail},
         {"name": "Headlines", "points": -h["rates"] * 0.8 - h["risk"] * 1.2, "detail": h_detail},
+        {"name": "Geopolitics", "points": -gs * 1.0, "detail": geo_detail},
     ], {"name": "Price trend", "points": (u_trend or 0.0) * 2.0, "detail": u_trend_detail})
     return {"gold": gold, "us30": us30,
             "components": {"data": d_score, "trend": t_score, "risk": r_score,

@@ -69,14 +69,15 @@ For phone alerts in this mode, fill in the `[telegram]` part of `settings.ini`. 
 
 ## D. Reading the dashboard
 
-The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it are the five drivers and how many points each one adds:
+The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it are the six drivers and how many points each one adds:
 
 | Driver | What it measures |
 |---|---|
 | US data this week | How yields and the dollar reacted in the first 15 minutes after each big US release. Yields and dollar up means hawkish, which is bad for gold and US30. Older releases count less (half weight after 3 days). |
 | Dollar and yields | The dollar and 10Y yields over the last 24 hours. |
 | Risk mood | VIX. Nervous markets hurt US30 and usually help gold. The exception is when gold falls along with stocks: that's traders selling everything, so fear isn't counted for gold. |
-| Headlines | Keyword tags on recent news. |
+| Headlines | Keyword tags on recent news (rates talk and market risk mood). |
+| Geopolitics | How much of the world's news is about war, military action, missiles and terrorism in the last 24 hours, compared with its normal level over the past 30 days. It comes from [The GDELT Project](https://www.gdeltproject.org/), a free, open database that monitors news worldwide every 15 minutes. More conflict news than usual supports gold as a safe haven and weighs on US30. If it turns **high**, Telegram sends you a message. |
 | Price trend | The market's own direction: the last 24 hours, the last 4 hours, and where price sits against its 5-day average. |
 
 When the data and news point one way but price keeps going the other, the card shows a **Price disagrees** note. That's a sign to wait for price to confirm.
@@ -135,7 +136,7 @@ This setup is meant to stay free and within each service's terms, as long as it 
 
 - **No charges.** GitHub Actions and Pages are free for public repos. The only paid extra is Actions cache storage above 10 GB, and this app uses about 50 MB. Without a payment method on your account, GitHub blocks extra usage rather than billing you.
 - **Light on GitHub.** A normal run takes about a minute. Around a big release a run stays on for at most 90 minutes, and it's idle most of that time.
-- **Personal use of the data.** Yahoo's price data is for personal use, and the calendar and headlines belong to Forex Factory, Google News and the publishers. The page tells search engines not to list it, credits its sources, and links headlines back to the original articles.
+- **Personal use of the data.** Yahoo's price data is for personal use, and the calendar and headlines belong to Forex Factory, Google News and the publishers. GDELT is open data and only asks for credit, which the page gives. The page tells search engines not to list it, credits its sources, and links headlines back to the original articles.
 - **Keep it non-commercial.** Don't sell access, run ads on it, or offer the bias as a signal service. That would break the data sources' terms and GitHub's rules for Pages and Actions.
 
 This is a practical summary, not legal advice.

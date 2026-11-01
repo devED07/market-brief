@@ -147,6 +147,8 @@ table.mk td:first-child{text-align:left}
 .tag.dovish{color:var(--bull);border-color:color-mix(in srgb,var(--bull) 45%,transparent)}
 .tag.risk-off{color:var(--event);border-color:color-mix(in srgb,var(--event) 45%,transparent)}
 .tag.risk-on{color:var(--us30);border-color:color-mix(in srgb,var(--us30) 45%,transparent)}
+.tag.geopolitics{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.tag.de-escalation{color:var(--flat);border-color:color-mix(in srgb,var(--flat) 45%,transparent)}
 
 footer{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);color:var(--faint);font-size:12px}
 footer p{margin:4px 0;max-width:80ch}
@@ -655,8 +657,8 @@ def render(brief: dict) -> str:
 
 <footer>
   {problems}
-  <p>Bias combines how big US releases moved yields and the dollar this week, the 24-hour dollar and yield trend, VIX, headline tone, and each market's own recent trend. It doesn't read chart patterns or levels, so your setup still decides entries.</p>
-  <p>Personal tool, not financial advice. Data: Forex Factory calendar feed, Yahoo Finance, Google News.</p>
+  <p>Bias combines how big US releases moved yields and the dollar this week, the 24-hour dollar and yield trend, VIX, headline tone, geopolitical tension, and each market's own recent trend. It doesn't read chart patterns or levels, so your setup still decides entries.</p>
+  <p>Personal tool, not financial advice. Data: Forex Factory calendar feed, Yahoo Finance, Google News, and The GDELT Project for geopolitical tension.</p>
 </footer>
 </div>
 <script>window.BRIEF={json.dumps(cfg)};</script>

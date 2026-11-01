@@ -78,6 +78,15 @@ def process(settings, brief: dict, now) -> str | None:
     if changed:
         messages.append("Bias changed\n" + "\n".join(changed))
 
+    # 1b. Geopolitical tension just turned high
+    geo = brief.get("geo")
+    if geo:
+        old_geo = state["labels"].get("geo")
+        if geo["level"] == "high" and old_geo and old_geo != "high":
+            messages.append(f"🌍 Geopolitical tension is <b>high</b>: conflict news at {geo['ratio']:.1f}x "
+                            "its 30-day normal. Usually supportive for gold, a headwind for US30.")
+        state["labels"]["geo"] = geo["level"]
+
     # 2. Heads-up before high-impact releases (about 60 and 15 minutes out)
     for rel in brief["releases"]:
         if rel["impact"] != "High" or rel["status"] != "upcoming":

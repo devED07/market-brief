@@ -42,13 +42,13 @@ def _parse_date(text: str) -> datetime | None:
     return None
 
 
-def _download() -> list[tuple[datetime, float]]:
+def _download(timespan: str = "30d") -> list[tuple[datetime, float]]:
     # GDELT allows one request every 5 seconds per IP address. GitHub's
     # machines share IP addresses with other users, so wait and retry.
     for wait in (0, 6, 10, 15):
         time.sleep(wait)
         resp = requests.get(API, params={"query": QUERY, "mode": "timelinevol", "format": "json",
-                                         "timespan": "30d"}, headers=HEADERS, timeout=30)
+                                         "timespan": timespan}, headers=HEADERS, timeout=30)
         if resp.status_code != 429:
             break
     resp.raise_for_status()
@@ -67,8 +67,12 @@ def _download() -> list[tuple[datetime, float]]:
     return sorted(points)
 
 
-def summarize(points: list[tuple[datetime, float]], now: datetime) -> dict:
-    recent = [v for t, v in points if now - t <= timedelta(hours=24)]
+def summarize(points: list[tuple[datetime, float]], now: datetime,
+              recent_points: list[tuple[datetime, float]] | None = None) -> dict:
+    """Baseline from the 30-day timeline (daily points). The last 24 hours come
+    from a separate 1-day timeline, because GDELT's daily points can lag."""
+    source = recent_points if recent_points else points
+    recent = [v for t, v in source if now - t <= timedelta(hours=24)]
     by_day: dict = {}
     for t, v in points:
         if now - t > timedelta(hours=24):
@@ -87,7 +91,9 @@ def summarize(points: list[tuple[datetime, float]], now: datetime) -> dict:
 def fetch(now: datetime) -> tuple[dict | None, str]:
     """Returns (summary or None, problem text)."""
     try:
-        summary = summarize(_download(), now)
+        baseline = _download("30d")
+        time.sleep(6)
+        summary = summarize(baseline, now, _download("1d"))
         CACHE_FILE.write_text(json.dumps(summary), encoding="utf-8")
         return summary, ""
     except Exception as exc:

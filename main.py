@@ -44,7 +44,7 @@ def next_run_time(now: datetime, settings, releases: list[dict]) -> datetime:
         candidates[0] += timedelta(minutes=step)
 
     for r in releases:
-        if r["impact"] != "High":
+        if r["impact"] != "High" or r.get("all_day"):
             continue
         for t in (r["time"] - timedelta(minutes=61),
                   r["time"] - timedelta(minutes=16),
@@ -57,7 +57,7 @@ def next_run_time(now: datetime, settings, releases: list[dict]) -> datetime:
 # Hosted mode: stay on around big releases so the 15-minute heads-up and the
 # reaction score don't depend on GitHub's schedule, which can run late.
 STAY_BEFORE_MIN = 45
-MAX_JOB_MIN = 170
+MAX_JOB_MIN = 90
 
 
 def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple[dict, str]:
@@ -152,7 +152,7 @@ def _stay_until(releases: list[dict], now: datetime) -> datetime | None:
     time its reaction will have been scored."""
     ends = []
     for r in releases:
-        if r["impact"] != "High" or r["status"] == "done":
+        if r["impact"] != "High" or r["status"] not in ("upcoming", "waiting"):
             continue
         if r["time"] - now <= timedelta(minutes=STAY_BEFORE_MIN):
             ends.append(r["time"] + timedelta(minutes=r["window_min"] + B.YAHOO_DELAY_MIN + 2))

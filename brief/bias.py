@@ -45,6 +45,9 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
     out.update({"status": "upcoming", "hawk": None, "verdict": "", "zn_pct": None,
                 "dxy_pct": None, "gold_pct": None, "us30_pct": None})
 
+    if rel.get("all_day"):
+        out["status"] = "all_day"
+        return out
     if t > now:
         return out
     if now < end + timedelta(minutes=YAHOO_DELAY_MIN):

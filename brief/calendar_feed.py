@@ -29,6 +29,10 @@ TOP_TIER = (
     "ism services", "powell", "jolts",
 )
 
+# Events with no fixed release time. The feed still gives them a clock time,
+# so the app lists them but doesn't count down to them or score them.
+ALL_DAY_WORDS = ("election", "referendum")
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (personal market brief app)"}
 
 
@@ -130,6 +134,7 @@ def group_releases(events: list[dict]) -> list[dict]:
         items.sort(key=lambda e: -e["weight"])
         titles = [e["title"] for e in items]
         joined = " ".join(titles).lower()
+        all_day = any(k in joined for k in ALL_DAY_WORDS)
         if "press conference" in joined:
             window = 45
         elif "fomc" in joined or "federal funds" in joined:
@@ -145,5 +150,6 @@ def group_releases(events: list[dict]) -> list[dict]:
             "impact": "High" if any(e["impact"] == "High" for e in items) else "Medium",
             "top_tier": any(e["weight"] >= 1.5 for e in items),
             "window_min": window,
+            "all_day": all_day,
         })
     return releases

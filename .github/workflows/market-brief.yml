@@ -29,7 +29,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 190
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v7
 
@@ -50,10 +50,13 @@ jobs:
         run: python main.py --hosted
 
       # GitHub switches off schedules in public repos after 60 days without
-      # activity. Re-enabling it on each run keeps it going.
+      # activity. One call a day (the 00:07 UTC run) keeps it going.
       - name: Keep the schedule switched on
         if: github.event_name == 'schedule'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/market-brief.yml/enable" --silent
+        run: |
+          if [ "$(date -u +%H)" = "00" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/market-brief.yml/enable" --silent
+          fi

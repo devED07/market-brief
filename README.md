@@ -90,7 +90,20 @@ Things to know:
 
 ---
 
-## E. Changing things
+## E. Staying within the rules
+
+This setup is meant to stay free and within each service's terms, as long as it stays a personal tool:
+
+- **No charges.** GitHub Actions and Pages are free for public repos. The only paid extra is Actions cache storage above 10 GB, and this app uses about 50 MB. Without a payment method on your account, GitHub blocks extra usage rather than billing you.
+- **Light on GitHub.** A normal run takes about a minute. Around a big release a run stays on for at most 90 minutes, and it's idle most of that time.
+- **Personal use of the data.** Yahoo's price data is for personal use, and the calendar and headlines belong to Forex Factory, Google News and the publishers. The page tells search engines not to list it, credits its sources, and links headlines back to the original articles.
+- **Keep it non-commercial.** Don't sell access, run ads on it, or offer the bias as a signal service. That would break the data sources' terms and GitHub's rules for Pages and Actions.
+
+This is a practical summary, not legal advice.
+
+---
+
+## F. Changing things
 
 | File | What it controls |
 |---|---|

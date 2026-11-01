@@ -339,7 +339,7 @@ def _night(brief: dict, tz) -> str:
     # Releases lane
     marks = []
     for rel in brief["releases"]:
-        if start <= rel["time"] < end:
+        if start <= rel["time"] < end and not rel.get("all_day"):
             p = pct(rel["time"])
             cls = "rel" if rel["impact"] == "High" else "rel med"
             title = f'{_t(rel["time"], tz)} {rel["headline"]}'
@@ -419,7 +419,9 @@ def _releases(brief: dict, tz, now: datetime) -> str:
             meta.append(f"with {len(r['others'])} related")
         meta_html = f'<div class="rel-meta">{", ".join(meta)}</div>' if meta else ""
 
-        if r["status"] == "upcoming":
+        if r["status"] == "all_day":
+            right = '<span class="v">No set time</span><span class="moves">Expect headline-driven moves</span>'
+        elif r["status"] == "upcoming":
             right = f'<span class="v" data-at="{r["time"].isoformat()}"></span>'
         elif r["status"] == "waiting":
             right = '<span class="v" style="color:var(--event)">Reading the reaction</span>'
@@ -435,7 +437,7 @@ def _releases(brief: dict, tz, now: datetime) -> str:
             right = f'<span class="v {tone}">{escape(r["verdict"])}</span>{moves}'
         imp = "imp" if r["impact"] == "High" else "imp med"
         out.append(
-            f'<div class="rel-row"><span class="rel-time">{_t(r["time"], tz)}</span>'
+            f'<div class="rel-row"><span class="rel-time">{"All day" if r["status"] == "all_day" else _t(r["time"], tz)}</span>'
             f'<div><div class="rel-title"><span class="{imp}" title="{r["impact"]} impact"></span>{escape(r["headline"])}</div>{meta_html}</div>'
             f'<div class="rel-out">{right}</div></div>'
         )
@@ -518,6 +520,7 @@ def render(brief: dict) -> str:
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
 <title>Market brief</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">

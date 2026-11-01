@@ -2,6 +2,7 @@
 about 10 minutes, which is fine for context and bias but not for entries."""
 
 import logging
+import warnings
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -9,6 +10,7 @@ import pandas as pd
 # yfinance prints a lot of noise when a symbol hiccups; the app reports
 # problems in its own words instead.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", module=r"yfinance(\.|$)")
 
 LABELS = {
     "gold": "Gold",

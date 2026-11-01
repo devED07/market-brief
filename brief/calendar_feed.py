@@ -24,7 +24,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 
 # Releases that move gold and the Dow the most. Matched against the title.
 TOP_TIER = (
-    "non-farm", "cpi", "fomc", "federal funds", "pce", "average hourly earnings",
+    "non-farm", "cpi", "federal funds", "fomc", "pce", "average hourly earnings",
     "unemployment rate", "advance gdp", "retail sales", "ppi", "ism manufacturing",
     "ism services", "powell", "jolts",
 )
@@ -44,6 +44,12 @@ def _parse_time(text: str) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=NEW_YORK)
     return dt.astimezone(timezone.utc)
+
+
+def _priority(title: str) -> int:
+    """Which title leads a group: NFP before earnings, CPI before claims..."""
+    low = title.lower()
+    return next((i for i, key in enumerate(TOP_TIER) if key in low), len(TOP_TIER))
 
 
 def _weight(title: str, impact: str) -> float:
@@ -131,7 +137,7 @@ def group_releases(events: list[dict]) -> list[dict]:
 
     releases = []
     for when, items in sorted(groups.items()):
-        items.sort(key=lambda e: -e["weight"])
+        items.sort(key=lambda e: (-e["weight"], _priority(e["title"])))
         titles = [e["title"] for e in items]
         joined = " ".join(titles).lower()
         all_day = any(k in joined for k in ALL_DAY_WORDS)

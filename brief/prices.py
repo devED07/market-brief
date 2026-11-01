@@ -25,6 +25,9 @@ def fetch_series(symbol: str) -> pd.Series:
     """5-minute closes for the last week, indexed in UTC."""
     import yfinance as yf  # imported here so demo mode works without it
 
+    # yfinance switches its own warnings back on when imported; hide them again.
+    warnings.filterwarnings("ignore", module=r"yfinance")
+
     df = yf.Ticker(symbol).history(period="7d", interval="5m", auto_adjust=False)
     if df is None or df.empty or "Close" not in df:
         raise ValueError(f"no data for {symbol}")

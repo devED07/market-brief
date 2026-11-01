@@ -54,9 +54,40 @@ def _matches(word: str, text: str) -> bool:
     return re.search(pattern, text) is not None
 
 
+# Major market news outlets. Headlines from these come first; others only
+# fill in if there are too few.
+TRUSTED = (
+    "reuters.com", "bloomberg.com", "cnbc.com", "wsj.com", "ft.com", "marketwatch.com",
+    "barrons.com", "apnews.com", "kitco.com", "fxstreet.com", "investing.com", "forexlive.com",
+    "finance.yahoo.com", "axios.com", "nytimes.com", "washingtonpost.com", "theguardian.com",
+    "bbc.com", "bbc.co.uk", "cnn.com", "foxbusiness.com", "economist.com", "politico.com",
+    "morningstar.com", "nasdaq.com", "investopedia.com", "businessinsider.com", "thestreet.com",
+)
+MIN_TRUSTED = 8
+
+# Local jewellery prices and similar stories that don't move XAUUSD or the Dow.
+JUNK = re.compile(
+    r"(\b(18|22|24)k\b|gold rate|rates? today|jewel|delhi|mumbai|chennai|kolkata|hyderabad|"
+    r"bengaluru|karachi|lahore|real estate|gold coast)", re.I)
+
+# Rate talk about other central banks shouldn't count as hawkish/dovish for the Fed.
+NOT_US = re.compile(
+    r"\b(india|indian|rbi|ecb|boj|bank of japan|boe|bank of england|rba|pboc|snb|"
+    r"bank of canada|rbnz|japan|china|chinese|euro ?zone|uk|britain|australia)\b", re.I)
+
+
 def _tag(title: str) -> list[str]:
     low = title.lower()
-    return [tag for tag, words in TAGS.items() if any(_matches(w, low) for w in words)]
+    tags = [tag for tag, words in TAGS.items() if any(_matches(w, low) for w in words)]
+    if NOT_US.search(title):
+        tags = [t for t in tags if t not in ("hawkish", "dovish")]
+    return tags
+
+
+def _trusted(source_url: str) -> bool:
+    host = re.sub(r"^https?://", "", source_url or "").split("/")[0].lower()
+    host = host[4:] if host.startswith("www.") else host
+    return any(host == d or host.endswith("." + d) for d in TRUSTED)
 
 
 def _fetch_query(q: str) -> list[dict]:
@@ -71,7 +102,9 @@ def _fetch_query(q: str) -> list[dict]:
     items = []
     for item in root.iter("item"):
         title = (item.findtext("title") or "").strip()
-        source = (item.findtext("source") or "").strip()
+        source_el = item.find("source")
+        source = (source_el.text or "").strip() if source_el is not None else ""
+        source_url = source_el.get("url", "") if source_el is not None else ""
         if source and title.endswith(" - " + source):
             title = title[: -len(" - " + source)]
         try:
@@ -83,6 +116,7 @@ def _fetch_query(q: str) -> list[dict]:
             "source": source,
             "link": (item.findtext("link") or "").strip(),
             "time": published,
+            "trusted": _trusted(source_url),
         })
     return items
 
@@ -90,19 +124,23 @@ def _fetch_query(q: str) -> list[dict]:
 def fetch_headlines(now: datetime | None = None, hours: int = 12, limit: int = 30) -> tuple[list[dict], list[str]]:
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=hours)
-    seen, out, problems = set(), [], []
+    seen, found, problems = set(), [], []
     for q in QUERIES:
         try:
             for h in _fetch_query(q):
                 key = re.sub(r"[^a-z0-9]", "", h["title"].lower())[:60]
-                if key in seen or h["time"] < cutoff:
+                if key in seen or h["time"] < cutoff or JUNK.search(h["title"]):
                     continue
                 seen.add(key)
                 h["tags"] = _tag(h["title"])
-                out.append(h)
+                found.append(h)
         except Exception as exc:
             problems.append(f"News ({q.split(' OR ')[0]}): {exc.__class__.__name__}")
-    out.sort(key=lambda h: h["time"], reverse=True)
+    found.sort(key=lambda h: h["time"], reverse=True)
+    out = [h for h in found if h.get("trusted")]
+    if len(out) < MIN_TRUSTED:
+        out += [h for h in found if not h.get("trusted")][: MIN_TRUSTED - len(out)]
+        out.sort(key=lambda h: h["time"], reverse=True)
     return out[:limit], problems
 
 

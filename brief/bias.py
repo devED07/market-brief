@@ -231,9 +231,12 @@ def _instrument(name: str, drivers: list[dict], trend: dict) -> dict:
         move = "falling" if trend["points"] < 0 else "rising"
         warning = (f"Price disagrees. The data and news lean {side}, but {name} has been {move} "
                    f"({trend['detail']}). Let price confirm before leaning on this.")
-    signs = {1 if d["points"] > 0 else -1 for d in drivers if abs(d["points"]) >= 0.5}
+    strong = [d for d in drivers if abs(d["points"]) >= 0.5]
+    signs = {1 if d["points"] > 0 else -1 for d in strong}
     if not signs:
         agreement = "Nothing is pushing hard either way"
+    elif len(strong) == 1:
+        agreement = f"Mostly one driver: {strong[0]['name'].lower()}"
     elif len(signs) == 1:
         agreement = "Drivers agree"
     else:

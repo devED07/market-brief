@@ -96,6 +96,9 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
             memory["headlines"] = headlines
         if news_problems and len(news_problems) == len(N.QUERIES):
             problems.append("Google News didn't respond")
+            if hosted:
+                for p in news_problems:
+                    print(f"  ! {p}")
 
     releases = [B.score_release(r, series, now) for r in C.group_releases(C.usd_events(rows))]
     upcoming_high = [r for r in releases if r["status"] == "upcoming" and r["impact"] == "High"]

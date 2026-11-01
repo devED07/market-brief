@@ -135,7 +135,7 @@ def fetch_headlines(now: datetime | None = None, hours: int = 12, limit: int = 3
                 h["tags"] = _tag(h["title"])
                 found.append(h)
         except Exception as exc:
-            problems.append(f"News ({q.split(' OR ')[0]}): {exc.__class__.__name__}")
+            problems.append(f"News ({q.split(' OR ')[0]}): {exc.__class__.__name__} {str(exc)[:120]}")
     found.sort(key=lambda h: h["time"], reverse=True)
     out = [h for h in found if h.get("trusted")]
     if len(out) < MIN_TRUSTED:

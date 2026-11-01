@@ -41,9 +41,12 @@ def build():
 
     rows = [
         row(-3, 10, 0, "ISM Manufacturing PMI", "High", "49.6", "49.1"),
+        row(-3, 10, 0, "ISM Manufacturing Prices", "Low", "58.5", "58.0"),
+        row(-2, 8, 30, "Import Prices m/m", "Low", "0.1%", "0.3%"),
         row(-2, 10, 0, "JOLTS Job Openings", "High", "7.21M", "7.23M"),
         row(-1, 8, 15, "ADP Non-Farm Employment Change", "High", "42K", "31K"),
         row(-1, 10, 0, "ISM Services PMI", "High", "51.8", "52.0"),
+        row(0, 7, 30, "Challenger Job Cuts y/y", "Low", "", "-12.4%"),
         row(0, 8, 30, "Core CPI m/m", "High", "0.3%", "0.3%"),
         row(0, 8, 30, "CPI m/m", "High", "0.3%", "0.4%"),
         row(0, 8, 30, "CPI y/y", "High", "2.9%", "3.0%"),
@@ -58,6 +61,7 @@ def build():
     reactions = [
         (_ny(now, -3, 10, 0), 15, {"treasury_10y": +0.18, "dollar": -0.22, "gold": +0.55, "us30": +0.20}),
         (_ny(now, -2, 10, 0), 15, {"treasury_10y": -0.02, "dollar": +0.03, "gold": -0.05, "us30": +0.02}),
+        (_ny(now, -2, 8, 30), 15, {"treasury_10y": -0.08, "dollar": +0.12, "gold": -0.20, "us30": -0.05}),
         (_ny(now, -1, 8, 15), 15, {"treasury_10y": -0.15, "dollar": +0.24, "gold": -0.40, "us30": -0.15}),
         (_ny(now, -1, 10, 0), 15, {"treasury_10y": -0.30, "dollar": +0.42, "gold": -0.90, "us30": -0.45}),
     ]

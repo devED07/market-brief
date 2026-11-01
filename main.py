@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from brief import bias as B
 from brief import calendar_feed as C
 from brief import dashboard as D
+from brief import leadup as L
 from brief import news as N
 from brief import prices as P
 from brief import telegram as T
@@ -44,7 +45,7 @@ def next_run_time(now: datetime, settings, releases: list[dict]) -> datetime:
         candidates[0] += timedelta(minutes=step)
 
     for r in releases:
-        if r["impact"] != "High" or r.get("all_day"):
+        if r["impact"] != "High" or r.get("all_day") or r.get("lead_only"):
             continue
         for t in (r["time"] - timedelta(minutes=61),
                   r["time"] - timedelta(minutes=16),
@@ -101,6 +102,8 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
                     print(f"  ! {p}")
 
     releases = [B.score_release(r, series, now) for r in C.group_releases(C.usd_events(rows))]
+    log = L.update_log(releases, now, persist=not demo)
+    leadups = L.build(releases, log, now)
     upcoming_high = [r for r in releases if r["status"] == "upcoming" and r["impact"] == "High"]
     market = B.market_status(now, tz)
     if demo:
@@ -117,6 +120,7 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         "bias": B.build(releases, snaps, N.tone(headlines), now),
         "market": market,
         "night": B.sessions_for_night(now, tz, market),
+        "leadups": leadups,
         "problems": problems,
         "next_update": next_run_time(now, settings, releases),
         "demo": demo,

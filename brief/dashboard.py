@@ -91,6 +91,22 @@ h2{font-size:17px;font-weight:700;margin:0 0 4px}
 .lanes{position:relative}
 .lanes .nowwrap{position:absolute;top:0;bottom:0;left:86px;right:0;pointer-events:none}
 
+/* lead-ups */
+.leads{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;align-items:start}
+.lead{background:var(--panel);border-radius:6px;padding:16px 18px;border-left:3px solid var(--event)}
+.lead-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.lead-name{font-weight:700;font-size:16px}
+.lead-when{color:var(--muted);font-size:13px}
+.lead-label{font-weight:800;font-stretch:80%;font-size:24px;line-height:1.15;margin:10px 0 2px}
+.lead-conf{color:var(--muted);font-size:13px;margin-bottom:10px}
+.lead-rows{width:100%;border-collapse:collapse;font-size:14px}
+.lead-rows td{padding:6px 0;border-top:1px solid var(--line);vertical-align:baseline}
+.lead-rows .ld{color:var(--muted);width:44px}
+.lead-rows .lv{text-align:right;white-space:nowrap;padding-left:10px}
+.lead-rows tr.pending td{color:var(--faint)}
+.lead p{margin:10px 0 0;font-size:13px;color:var(--muted);max-width:70ch}
+.lead p.fine{color:var(--faint);font-size:12px;margin-top:6px}
+
 /* lower grid */
 .grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
 .panel{background:var(--panel);border-radius:6px;padding:14px 18px}
@@ -144,6 +160,7 @@ footer p{margin:4px 0;max-width:80ch}
   .scale-ends{margin-left:86px}
 }
 @media (max-width:600px){
+  .leads{grid-template-columns:1fr}
   .rel-row{grid-template-columns:70px 1fr}
   .rel-time{white-space:nowrap}
   .rel-out .moves{display:inline-block}
@@ -339,7 +356,7 @@ def _night(brief: dict, tz) -> str:
     # Releases lane
     marks = []
     for rel in brief["releases"]:
-        if start <= rel["time"] < end and not rel.get("all_day"):
+        if start <= rel["time"] < end and not rel.get("all_day") and not rel.get("lead_only"):
             p = pct(rel["time"])
             cls = "rel" if rel["impact"] == "High" else "rel med"
             title = f'{_t(rel["time"], tz)} {rel["headline"]}'
@@ -394,13 +411,80 @@ def _night(brief: dict, tz) -> str:
 </section>"""
 
 
+def _leadups(brief: dict, tz, now: datetime) -> str:
+    reads = brief.get("leadups") or []
+    if not reads:
+        body = ('<p class="empty">No NFP, CPI or PCE in this week\'s calendar yet. '
+                'A lead-up read appears here once one is scheduled.</p>')
+        return f"""
+<section aria-labelledby="lead-h">
+  <h2 id="lead-h">Lead-up to the big releases</h2>
+  <p class="sub">How the smaller releases before NFP, CPI and PCE came in, and what they hint about the big one.</p>
+  <div class="panel">{body}</div>
+</section>"""
+
+    cards = []
+    for read in reads:
+        t, rel = read["target"], read["release"]
+        ev = rel["events"][0]
+        when = _t(rel["time"], tz, "%A") + " " + _t(rel["time"], tz)
+        if ev["forecast"]:
+            when += f", forecast {escape(ev['forecast'])}"
+        rows = []
+        items = [dict(s, kind="done") for s in read["scored"]] + [dict(p, kind="pending") for p in read["pending"]]
+        items.sort(key=lambda x: x["time"])
+        for it in items:
+            day = _t(it["time"], tz, "%a")
+            if it["kind"] == "done":
+                h = it["hawk"]
+                tone = "tone-bear" if h >= 0.3 else "tone-bull" if h <= -0.3 else "tone-flat"
+                hot_cold = "came in hot" if h >= 0.3 else "came in cold" if h <= -0.3 else "in line"
+                rows.append(f'<tr><td class="ld">{day}</td><td>{escape(it["name"])}</td>'
+                            f'<td class="lv {tone}">{hot_cold}</td></tr>')
+            else:
+                label = "reading the reaction" if it["status"] == "waiting" else "still to come"
+                rows.append(f'<tr class="pending"><td class="ld">{day}</td><td>{escape(it["name"])}</td>'
+                            f'<td class="lv">{label}</td></tr>')
+        table = f'<table class="lead-rows">{"".join(rows)}</table>' if rows else ""
+
+        meaning = ""
+        if read["lean"] is not None and abs(read["lean"]) >= 0.3:
+            if read["lean"] > 0:
+                meaning = ("Hot data usually lifts yields and the dollar, which weighs on gold and US30. "
+                           f"If {t['name']} confirms it, some of that may already be priced in. "
+                           "A surprise the other way would likely move price more.")
+            else:
+                meaning = ("Soft data usually pulls yields and the dollar down, which helps gold. For US30 it "
+                           "depends on whether the market reads it as rate cuts (good) or a slowdown (bad). "
+                           f"If {t['name']} confirms it, some of that may already be priced in. "
+                           "A surprise the other way would likely move price more.")
+        meaning_html = f"<p>{meaning}</p>" if meaning else ""
+        conf = f'<div class="lead-conf">{escape(read["confidence"])}</div>' if read["confidence"] else '<div class="lead-conf"></div>'
+        cards.append(f"""
+<article class="lead" aria-label="Lead-up to {escape(t['name'])}">
+  <div class="lead-head"><span class="lead-name">{escape(t['name'])}</span><span class="lead-when">{when}</span></div>
+  <div class="lead-label tone-{read['tone']}">{escape(read['label'])}</div>
+  {conf}
+  {table}
+  {meaning_html}
+  <p class="fine">{escape(t['note'])}</p>
+</article>""")
+
+    return f"""
+<section aria-labelledby="lead-h">
+  <h2 id="lead-h">Lead-up to the big releases</h2>
+  <p class="sub">How the smaller releases before it came in, read from the market's reaction to each, and what that hints about the big one.</p>
+  <div class="leads">{''.join(cards)}</div>
+</section>"""
+
+
 def _short(title: str) -> str:
     return (title.replace("Non-Farm Employment Change", "NFP").replace(" m/m", "")
             .replace(" y/y", "").replace(" q/q", "").replace("Federal Funds Rate", "Fed decision"))
 
 
 def _releases(brief: dict, tz, now: datetime) -> str:
-    rels = [r for r in brief["releases"] if r["time"] >= now - timedelta(days=7)]
+    rels = [r for r in brief["releases"] if r["time"] >= now - timedelta(days=7) and not r.get("lead_only")]
     if not rels:
         return '<p class="empty">No US releases in the feed yet. The calendar refreshes every hour.</p>'
     out, last_day = [], None
@@ -544,6 +628,8 @@ def render(brief: dict) -> str:
 </div>
 
 {_night(brief, tz)}
+
+{_leadups(brief, tz, now)}
 
 <section class="grid2">
   <div>

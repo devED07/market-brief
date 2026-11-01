@@ -6,6 +6,7 @@ from datetime import timedelta
 import requests
 
 from .config import DATA_DIR
+from .leadup import one_line as leadup_line
 
 STATE_FILE = DATA_DIR / "alert_state.json"
 
@@ -91,7 +92,11 @@ def process(settings, brief: dict, now) -> str | None:
                 state["sent"].append(skip)
             when = rel["time"].astimezone(tz)
             extra = f" (forecast {rel['events'][0]['forecast']})" if rel["events"][0]["forecast"] else ""
-            messages.append(f"⚠️ <b>{rel['headline']}</b>{extra} in {int(mins)} min, at {when:%I:%M %p}".replace("at 0", "at "))
+            msg = f"⚠️ <b>{rel['headline']}</b>{extra} in {int(mins)} min, at {when:%I:%M %p}".replace("at 0", "at ")
+            for read in brief.get("leadups", []):
+                if read["release"]["time"] == rel["time"]:
+                    msg += "\n" + leadup_line(read)
+            messages.append(msg)
 
     # 3. Release scored
     for rel in brief["releases"]:

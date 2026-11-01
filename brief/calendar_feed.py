@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from .config import DATA_DIR
+from .leadup import is_lead_in
 
 FEEDS = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
@@ -98,7 +99,8 @@ def load_raw() -> tuple[list[dict], bool, str]:
 
 
 def usd_events(rows: list[dict]) -> list[dict]:
-    """High and medium impact USD events, oldest first."""
+    """High and medium impact USD events, plus low-impact ones that lead
+    into NFP, CPI or PCE (see leadup.py), oldest first."""
     seen = set()
     events = []
     for r in rows:
@@ -107,7 +109,8 @@ def usd_events(rows: list[dict]) -> list[dict]:
         impact = r.get("impact", "")
         title = (r.get("title") or "").strip()
         weight = _weight(title, impact)
-        if weight <= 0:
+        lead_only = weight <= 0 and impact == "Low" and is_lead_in(title)
+        if weight <= 0 and not lead_only:
             continue
         when = _parse_time(r.get("date", ""))
         if when is None:
@@ -123,6 +126,7 @@ def usd_events(rows: list[dict]) -> list[dict]:
             "forecast": (r.get("forecast") or "").strip(),
             "previous": (r.get("previous") or "").strip(),
             "weight": weight,
+            "lead_only": lead_only,
         })
     events.sort(key=lambda e: e["time"])
     return events
@@ -153,7 +157,9 @@ def group_releases(events: list[dict]) -> list[dict]:
             "headline": titles[0],
             "others": titles[1:],
             "weight": max(e["weight"] for e in items),
-            "impact": "High" if any(e["impact"] == "High" for e in items) else "Medium",
+            "impact": ("High" if any(e["impact"] == "High" for e in items)
+                       else "Medium" if any(e["impact"] == "Medium" for e in items) else "Low"),
+            "lead_only": all(e["lead_only"] for e in items),
             "top_tier": any(e["weight"] >= 1.5 for e in items),
             "window_min": window,
             "all_day": all_day,

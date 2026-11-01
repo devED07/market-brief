@@ -90,7 +90,7 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
 def data_score(releases: list[dict], now: datetime) -> tuple[float | None, str]:
     total, used, notes = 0.0, 0, []
     for r in releases:
-        if r["status"] != "done" or r["hawk"] is None:
+        if r["status"] != "done" or r["hawk"] is None or r.get("lead_only"):
             continue
         age_h = (now - r["time"]).total_seconds() / 3600
         if age_h > 7 * 24:

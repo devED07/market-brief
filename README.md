@@ -80,6 +80,16 @@ The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it 
 
 "Drivers are mixed" means low conviction, so let your chart lead.
 
+**Lead-up to the big releases.** For each NFP, CPI or Core PCE in the calendar, the dashboard lists the smaller releases that come before it and whether each came in hot or cold, then says what they hint about the big one:
+
+| Big release | Lead-ins it watches |
+|---|---|
+| NFP | ADP, jobless claims, ISM services and manufacturing, JOLTS, Challenger job cuts, consumer confidence |
+| CPI | PPI, ISM prices paid, import prices, wage growth from the last NFP, inflation expectations |
+| Core PCE | CPI, PPI, import prices |
+
+Each lead-in is read from how yields and the dollar reacted to it, because the free calendar doesn't include the actual numbers. Some lead-ins predict better than others. ADP is a weak guide to NFP, while CPI and PPI tell you most of what PCE will show. So each read comes with a confidence level. Scored releases are kept for 45 days, so lead-ins from earlier weeks still count. The Telegram heads-up before each big release includes the lead-up read.
+
 The purple bar at the top warns you before high-impact releases (with a countdown) and right after them. The first 15 to 30 minutes after a release are often noisy and can reverse.
 
 Things to know:

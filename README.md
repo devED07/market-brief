@@ -77,7 +77,7 @@ The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it 
 | Dollar and yields | The dollar and 10Y yields over the last 24 hours. |
 | Risk mood | VIX. Nervous markets hurt US30 and usually help gold. The exception is when gold falls along with stocks: that's traders selling everything, so fear isn't counted for gold. |
 | Headlines | Keyword tags on recent news (rates talk and market risk mood). |
-| Geopolitics | How much of the world's news is about war, military action, missiles and terrorism in the last 24 hours, compared with its normal level over the past 30 days. It comes from [The GDELT Project](https://www.gdeltproject.org/), a free, open database that monitors news worldwide every 15 minutes. More conflict news than usual supports gold as a safe haven and weighs on US30. If it turns **high**, Telegram sends you a message. |
+| Geopolitics | Of the news about events between two countries in the last 24 hours, how much is about conflict (threats, military moves, coercion, attacks, fighting), compared with the normal level over the past 30 days. It comes from the live event feed of [The GDELT Project](https://www.gdeltproject.org/), a free, open database that codes world news every 15 minutes. More conflict news than usual supports gold as a safe haven and weighs on US30. If it turns **high**, Telegram sends you a message. |
 | Price trend | The market's own direction: the last 24 hours, the last 4 hours, and where price sits against its 5-day average. |
 
 When the data and news point one way but price keeps going the other, the card shows a **Price disagrees** note. That's a sign to wait for price to confirm.

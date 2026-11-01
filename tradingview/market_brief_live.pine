@@ -1,0 +1,129 @@
+// Market Brief (live drivers) for TradingView
+// Shows the live-market part of the Market Brief bias on your chart:
+// dollar and yields, risk mood (VIX), and the chart's own price trend.
+// US data reactions and headlines aren't available inside TradingView,
+// so those two drivers stay on the dashboard.
+//
+// Add it: Pine Editor > paste this > Save > Add to chart.
+// Works on gold (XAUUSD, GOLD, GC) and US30 / Dow charts on any timeframe.
+
+//@version=6
+indicator("Market Brief (live drivers)", shorttitle = "MB live", overlay = true)
+
+// ------------------------------------------------------------------ inputs
+instIn  = input.string("Auto", "Instrument", options = ["Auto", "Gold", "US30"])
+dxySym  = input.symbol("TVC:DXY", "Dollar index")
+yldSym  = input.symbol("TVC:US10Y", "US 10-year yield")
+vixSym  = input.symbol("TVC:VIX", "VIX")
+dowSym  = input.symbol("TVC:DJI", "Dow, for gold's sell-everything check")
+posIn   = input.string("Top right", "Table position", options = ["Top right", "Bottom right", "Top left", "Bottom left"])
+tgChat  = input.string("", "Telegram chat id (only for webhook alerts)")
+
+// ------------------------------------------------------------------ helpers
+f_clamp(x, lo, hi) => math.max(lo, math.min(hi, x))
+f_pct(a, b) => (a - b) / b * 100.0
+f_signed(x) => (x >= 0 ? "+" : "") + str.tostring(x, "#0.0")
+f_pos(s) => s == "Top right" ? position.top_right : s == "Bottom right" ? position.bottom_right : s == "Top left" ? position.top_left : position.bottom_left
+
+// ------------------------------------------------------------------ which market
+tk = str.upper(syminfo.ticker)
+autoGold = str.contains(tk, "XAU") or str.contains(tk, "GOLD") or syminfo.root == "GC" or syminfo.root == "MGC"
+isGold = instIn == "Gold" or (instIn == "Auto" and autoGold)
+mkt = isGold ? "Gold" : "US30"
+
+// ------------------------------------------------------------------ data
+// Daily bars for "today vs yesterday", hourly bars for 4h and the 5-day
+// average, so the numbers are the same on any chart timeframe.
+[dxyC, dxyP] = request.security(dxySym, "D", [close, close[1]])
+[yldC, yldP] = request.security(yldSym, "D", [close, close[1]])
+[vixC, vixP] = request.security(vixSym, "D", [close, close[1]])
+[dowC, dowP] = request.security(dowSym, "D", [close, close[1]])
+[ownC, ownP] = request.security(syminfo.tickerid, "D", [close, close[1]])
+[h1C, h1C4, h1Avg] = request.security(syminfo.tickerid, "60", [close, close[4], ta.sma(close, 115)])
+
+dxyChg = f_pct(dxyC, dxyP)
+yldBp  = (yldC - yldP) * 100.0
+vixChg = f_pct(vixC, vixP)
+dowChg = f_pct(dowC, dowP)
+own1d  = f_pct(ownC, ownP)
+own4h  = f_pct(h1C, h1C4)
+ownVs5 = f_pct(h1C, h1Avg)
+
+// ------------------------------------------------------------------ drivers (same rules as the app)
+// Dollar and yields: + = hawkish pressure (dollar up, yields up)
+dyScore = (f_clamp(dxyChg / 0.5, -1.5, 1.5) + f_clamp(yldBp / 5.0, -1.5, 1.5)) / 2.0
+
+// Risk mood: + = nervous
+vixAdj  = vixC >= 25 ? 0.75 : vixC >= 20 ? 0.35 : vixC <= 14 ? -0.3 : 0.0
+risk    = f_clamp(f_clamp(vixChg / 10.0, -1.0, 1.0) + vixAdj, -1.5, 1.5)
+
+// Fear only helps gold if gold is holding up. Gold falling with stocks = selling everything.
+goldRisk = risk < 0.2 ? risk * 1.5 : (own1d <= -0.5 and dowChg < 0) ? 0.0 : own1d < -0.2 ? risk * 0.75 : risk * 1.5
+sellAll  = isGold and risk >= 0.2 and own1d <= -0.5 and dowChg < 0
+
+// Price trend: today, last 4 hours, and against the 5-day average
+s1 = isGold ? 1.5 : 1.0
+s4 = isGold ? 0.6 : 0.4
+s5 = isGold ? 2.0 : 1.5
+trendN = 0.4 * f_clamp(own1d / s1, -1.5, 1.5) + 0.3 * f_clamp(own4h / s4, -1.5, 1.5) + 0.3 * f_clamp(ownVs5 / s5, -1.5, 1.5)
+
+dyPts    = isGold ? -dyScore * 2.0 : -dyScore * 1.5
+riskPts  = isGold ? goldRisk : -risk * 2.5
+trendPts = trendN * 2.0
+score    = f_clamp(dyPts + riskPts + trendPts, -10.0, 10.0)
+
+absS = math.abs(score)
+side = score > 0 ? "bullish" : "bearish"
+biasText = absS < 1.5 ? "No clear lean" : absS < 4 ? "Leaning " + side : absS < 7 ? (score > 0 ? "Bullish" : "Bearish") : "Strongly " + side
+
+// ------------------------------------------------------------------ table
+cBg    = #1C2531
+cLine  = #2E3A4A
+cText  = #E3E7ED
+cMuted = #8E99AA
+cBull  = #5BB585
+cBear  = #E26A5E
+cFlat  = #A9B2BF
+cGold  = #D1A84A
+cUs30  = #86A9CF
+toneC  = absS < 1.5 ? cFlat : score > 0 ? cBull : cBear
+ptsC(x) => math.abs(x) < 0.05 ? cMuted : x > 0 ? cBull : cBear
+
+var table tb = table.new(f_pos(posIn), 3, 7, bgcolor = cBg, frame_color = cLine, frame_width = 1, border_color = cLine, border_width = 1)
+
+if barstate.islast
+    table.cell(tb, 0, 0, "Market Brief, live: " + mkt, text_color = isGold ? cGold : cUs30, text_halign = text.align_left, text_size = size.small)
+    table.merge_cells(tb, 0, 0, 2, 0)
+    table.cell(tb, 0, 1, biasText + "  " + f_signed(score), text_color = toneC, text_halign = text.align_left, text_size = size.large)
+    table.merge_cells(tb, 0, 1, 2, 1)
+
+    table.cell(tb, 0, 2, "Dollar and yields", text_color = cText, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 1, 2, "DXY " + f_signed(dxyChg) + "%, 10Y " + f_signed(yldBp) + " bp", text_color = cMuted, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 2, 2, f_signed(dyPts), text_color = ptsC(dyPts), text_size = size.small)
+
+    table.cell(tb, 0, 3, "Risk mood", text_color = cText, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 1, 3, "VIX " + str.tostring(vixC, "#0.0") + ", " + f_signed(vixChg) + "%" + (sellAll ? ", selling everything" : ""), text_color = cMuted, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 2, 3, f_signed(riskPts), text_color = ptsC(riskPts), text_size = size.small)
+
+    table.cell(tb, 0, 4, "Price trend", text_color = cText, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 1, 4, f_signed(own1d) + "% today, " + f_signed(own4h) + "% 4h, " + (ownVs5 >= 0 ? "above" : "below") + " 5-day avg", text_color = cMuted, text_halign = text.align_left, text_size = size.small)
+    table.cell(tb, 2, 4, f_signed(trendPts), text_color = ptsC(trendPts), text_size = size.small)
+
+    table.cell(tb, 0, 5, "US data and headlines are on the dashboard", text_color = cMuted, text_halign = text.align_left, text_size = size.tiny)
+    table.merge_cells(tb, 0, 5, 2, 5)
+
+// ------------------------------------------------------------------ alerts
+// Create an alert on this indicator with "Any alert() function call".
+// It fires when the bias label changes at a bar close. If you fill in a
+// Telegram chat id above, the message is sent as JSON that Telegram's
+// sendMessage accepts, so a webhook can go straight to your bot.
+var string lastBias = ""
+if barstate.isconfirmed
+    if lastBias != "" and biasText != lastBias
+        msg = mkt + " live bias: " + lastBias + " to " + biasText + " (" + f_signed(score) + ")"
+        payload = tgChat == "" ? msg : '{"chat_id": "' + tgChat + '", "text": "' + msg + '"}'
+        alert(payload, alert.freq_once_per_bar_close)
+    lastBias := biasText
+
+// Score in the data window (and as {{plot_0}} in alert messages)
+plot(score, "Live bias score", display = display.data_window)

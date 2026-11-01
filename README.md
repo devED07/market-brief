@@ -103,7 +103,33 @@ Things to know:
 
 ---
 
-## E. Staying within the rules
+## E. On your TradingView chart
+
+`tradingview/market_brief_live.pine` is an indicator that shows the live-market part of the bias right on your chart, using TradingView's own prices: dollar and yields, risk mood, and the chart's price trend, with the same rules as the dashboard. US data reactions and headlines aren't available inside TradingView, so for the full bias, check the dashboard. Because the indicator has three of the five drivers, its score can differ from the dashboard's.
+
+**Add it (one time):**
+1. In this repo, open `tradingview/market_brief_live.pine` and click the copy button.
+2. In TradingView, open a gold or US30 chart, then open **Pine Editor** at the bottom.
+3. Select everything in the editor, paste over it, click **Save**, then **Add to chart**.
+
+It works on XAUUSD, GOLD, GC, US30 and Dow charts, on any timeframe. Settings let you move the table or force Gold/US30 if your broker's symbol name isn't recognised.
+
+**Alert when the bias changes:** click **Alert**, set Condition to **Market Brief (live drivers)** and **Any alert() function call**, then pick how you want to be notified (TradingView app, email, or webhook).
+
+**Send TradingView alerts to Telegram.** This needs two-factor login on TradingView and a plan that includes webhooks.
+1. Set up the Telegram bot first (part B), and keep the token and chat id handy.
+2. In the indicator's settings, put your chat id in **Telegram chat id**.
+3. In the alert's Notifications, tick **Webhook URL** and enter
+   `https://api.telegram.org/bot<YOUR TOKEN>/sendMessage`
+
+Your own price alerts can go to Telegram the same way. Use the same webhook URL, with this as the alert message:
+```
+{"chat_id": "<YOUR CHAT ID>", "text": "{{ticker}} hit {{close}}"}
+```
+
+---
+
+## F. Staying within the rules
 
 This setup is meant to stay free and within each service's terms, as long as it stays a personal tool:
 
@@ -116,7 +142,7 @@ This is a practical summary, not legal advice.
 
 ---
 
-## F. Changing things
+## G. Changing things
 
 | File | What it controls |
 |---|---|

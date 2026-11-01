@@ -1,6 +1,7 @@
 """Headlines from Google News RSS (free, no key), tagged with simple
 keyword rules so you can see why the headline tone leans one way."""
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,8 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import quote_plus
 
 import requests
+
+from .config import DATA_DIR
 
 QUERIES = [
     "gold price",
@@ -142,6 +145,27 @@ def fetch_headlines(now: datetime | None = None, hours: int = 12, limit: int = 3
         out += [h for h in found if not h.get("trusted")][: MIN_TRUSTED - len(out)]
         out.sort(key=lambda h: h["time"], reverse=True)
     return out[:limit], problems
+
+
+CACHE_FILE = DATA_DIR / "headlines_cache.json"
+
+
+def save_cache(headlines: list[dict]) -> None:
+    rows = [dict(h, time=h["time"].isoformat()) for h in headlines]
+    CACHE_FILE.write_text(json.dumps(rows), encoding="utf-8")
+
+
+def load_cache(now: datetime, max_age_h: int = 3) -> list[dict]:
+    """Last good headlines, used when Google News doesn't answer."""
+    try:
+        rows = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        for r in rows:
+            r["time"] = datetime.fromisoformat(r["time"])
+        if rows and now - max(r["time"] for r in rows) < timedelta(hours=max_age_h):
+            return rows
+    except Exception:
+        pass
+    return []
 
 
 def tone(headlines: list[dict]) -> dict:

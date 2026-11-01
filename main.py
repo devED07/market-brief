@@ -90,10 +90,10 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         memory.setdefault("snaps", {}).update(snaps)
 
         headlines, news_problems = N.fetch_headlines(now)
-        if not headlines and memory.get("headlines"):
-            headlines = memory["headlines"]
         if headlines:
-            memory["headlines"] = headlines
+            N.save_cache(headlines)
+        else:
+            headlines = N.load_cache(now)
         if news_problems and len(news_problems) == len(N.QUERIES):
             problems.append("Google News didn't respond")
             if hosted:

@@ -63,7 +63,7 @@ def _download() -> list[tuple[datetime, float]]:
             if when is not None and p.get("value") is not None:
                 points.append((when, float(p["value"])))
     if not points:
-        raise ValueError("GDELT returned no timeline")
+        raise ValueError(f"GDELT returned no timeline: {str(data)[:200]}")
     return sorted(points)
 
 
@@ -75,7 +75,9 @@ def summarize(points: list[tuple[datetime, float]], now: datetime) -> dict:
             by_day.setdefault(t.date(), []).append(v)
     daily = [statistics.mean(vs) for vs in by_day.values()]
     if not recent or len(daily) < 7:
-        raise ValueError("not enough GDELT history")
+        span = f"{points[0][0]:%m-%d %H:%M} to {points[-1][0]:%m-%d %H:%M}" if points else "none"
+        raise ValueError(f"not enough GDELT history: {len(points)} points, {span}, "
+                         f"{len(recent)} in last 24h, {len(daily)} earlier days")
     base = statistics.median(daily)
     ratio = statistics.mean(recent) / base if base > 0 else 1.0
     level = next(label for cut, label in LEVELS if ratio >= cut)

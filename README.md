@@ -33,6 +33,18 @@ GitHub can start scheduled runs a few minutes late when it's busy. If an update 
 
 **Update by hand:** open the **Actions** tab, choose **Market Brief**, then **Run workflow**.
 
+**Reliable timing with a free outside timer.** On the free plan, GitHub treats scheduled runs as best effort and often skips them. A free [cron-job.org](https://cron-job.org) job can press "Run workflow" for you every 30 minutes:
+
+1. In GitHub, go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Give it access to **only** `market-brief`, with **Actions: Read and write** as its only permission. Copy the token (it starts with `github_pat_`).
+2. In cron-job.org, create a cronjob with:
+   - URL: `https://api.github.com/repos/<your-username>/market-brief/actions/workflows/market-brief.yml/dispatches`
+   - Schedule: every 30 minutes (minutes 7 and 37), Monday to Saturday, time zone Asia/Manila
+   - Request method: `POST`, with the body `{"ref":"main"}`
+   - Headers: `Accept: application/vnd.github+json`, `Authorization: Bearer <your token>`, `X-GitHub-Api-Version: 2026-03-10`, `Content-Type: application/json`
+3. Run a test. A 200 or 204 response means it worked, and a new run appears in the Actions tab.
+
+GitHub's own schedule stays on as a backup. If both start at once, only one update runs. The token can only start or stop this repo's workflows. It expires after the time you choose, so renew it and paste the new one into cron-job.org when it does.
+
 **If a run fails:** GitHub emails you. Open the failed run in the Actions tab, copy the red error text, and paste it into a chat with Claude.
 
 ---

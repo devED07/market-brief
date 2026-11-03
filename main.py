@@ -12,6 +12,7 @@ Options:
 """
 
 import argparse
+import json
 import sys
 import time
 import traceback
@@ -181,6 +182,18 @@ def run_hosted(settings) -> None:
     tz = settings.tz
     print("Market Brief, GitHub mode")
     print(PUB.restore_state())
+
+    # Weekends: markets are shut, so a fresh update every 3 hours is plenty.
+    now = datetime.now(timezone.utc)
+    if B.market_status(now, tz)["reason"] == "weekend":
+        try:
+            last = json.loads((DATA_DIR / "last_meta.json").read_text(encoding="utf-8"))["generated"] / 1000
+            age_min = (now.timestamp() - last) / 60
+            if age_min < 170:
+                print(f"Markets are closed and the last update is {age_min:.0f} min old. Skipping this one.")
+                return
+        except Exception:
+            pass
     if settings.telegram_enabled:
         print("Telegram alerts are on.")
     memory: dict = {}

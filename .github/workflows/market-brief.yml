@@ -1,35 +1,50 @@
 name: Market Brief
 
+# How updates keep coming every 30 minutes:
+# Each update, when it finishes, lines up the next one. That next run waits
+# in the "timer" environment, which has a 30-minute wait timer (set in
+# Settings > Environments). Waiting there costs no Actions minutes.
+# GitHub's own schedule below is a backup that restarts the chain if it
+# ever stops. On the free plan GitHub often skips scheduled runs, which is
+# why the chain exists.
+
 on:
   schedule:
-    # GitHub cron times are in UTC. Runs start at :07 and :37 because the top
-    # of the hour is GitHub's busiest time and runs get delayed there.
-    #
-    # Weekdays (UTC): every 30 minutes.
+    # Times are UTC. :07 and :37 avoid GitHub's busy top of the hour.
     - cron: "7,37 * * * 1-5"
-    # Saturday: every 3 hours while markets are shut.
     - cron: "7 */3 * * 6"
-    # Sunday: every 3 hours, then every 30 minutes from 21:00 UTC,
-    # when gold and Dow futures reopen (Monday morning in Manila).
     - cron: "7 0-18/3 * * 0"
     - cron: "7,37 21-23 * * 0"
-  # Lets you start an update by hand from the Actions tab.
   workflow_dispatch:
+    inputs:
+      chained:
+        description: "Wait 30 minutes first (used by the update chain)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # publish the dashboard to the gh-pages branch
-  actions: write    # keep this schedule from switching itself off
-
-# One update at a time. A run that stays on around a big release makes the
-# next scheduled run wait instead of doubling up.
-concurrency:
-  group: market-brief
-  cancel-in-progress: false
+  actions: write    # line up the next update; keep the schedule switched on
 
 jobs:
+  wait:
+    if: ${{ inputs.chained }}
+    runs-on: ubuntu-latest
+    environment: timer
+    timeout-minutes: 5
+    steps:
+      - run: echo "Waited for the 30-minute timer."
+
   update:
+    needs: wait
+    if: ${{ !cancelled() && (needs.wait.result == 'success' || needs.wait.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 110
+    # One update at a time. A run that stays on around a big release makes
+    # the next one wait instead of doubling up.
+    concurrency:
+      group: market-brief
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
@@ -49,14 +64,40 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python main.py --hosted
 
+      - name: Line up the next update
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # Safety: only chain if the 30-minute wait timer is really set,
+          # otherwise updates would run back to back.
+          wait=$(gh api "repos/$REPO/environments/timer" \
+                   --jq '[.protection_rules[]? | select(.type=="wait_timer") | .wait_timer][0] // 0' 2>/dev/null || echo 0)
+          if [ "${wait:-0}" -lt 25 ]; then
+            echo "::warning::Set a 30-minute wait timer on the 'timer' environment (Settings > Environments) to get updates every 30 minutes."
+            exit 0
+          fi
+          # Keep a single chain: skip if another update is already lined up.
+          lined_up=$(gh api "repos/$REPO/actions/workflows/market-brief.yml/runs?per_page=20" \
+                   --jq "[.workflow_runs[] | select(.id != $RUN_ID) | select(.status==\"waiting\" or .status==\"queued\" or .status==\"pending\" or .status==\"requested\")] | length")
+          if [ "${lined_up:-0}" -gt 0 ]; then
+            echo "Another update is already lined up."
+            exit 0
+          fi
+          gh api -X POST "repos/$REPO/actions/workflows/market-brief.yml/dispatches" \
+            -f ref=main -f "inputs[chained]=true" --silent
+          echo "Next update lined up for about 30 minutes from now."
+
       # GitHub switches off schedules in public repos after 60 days without
-      # activity. One call a day (the 00:07 UTC run) keeps it going.
+      # activity. One call a day keeps the backup schedule going.
       - name: Keep the schedule switched on
-        if: github.event_name == 'schedule'
+        if: ${{ always() }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$(date -u +%H)" = "00" ]; then
+          if [ "$(date -u +%H)" = "00" ] && [ "$(date -u +%M)" -lt 40 ]; then
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/market-brief.yml/enable" --silent
           fi

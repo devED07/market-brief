@@ -60,6 +60,8 @@ def restore_state() -> str:
         src = tmp / "repo" / "state"
         found = []
         DATA_DIR.mkdir(exist_ok=True)
+        if (tmp / "repo" / "meta.json").exists():
+            shutil.copy2(tmp / "repo" / "meta.json", DATA_DIR / "last_meta.json")
         for name in STATE_FILES:
             if (src / name).exists():
                 shutil.copy2(src / name, DATA_DIR / name)

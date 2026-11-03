@@ -28,6 +28,7 @@ class Settings:
     telegram_token: str = ""
     telegram_chat_id: str = ""
     telegram_every_update: bool = False
+    telegram_brief_time: str = "20:30"
 
     @property
     def tz(self) -> ZoneInfo:
@@ -69,12 +70,14 @@ def load_settings() -> Settings:
     s.telegram_token = (tg.get("bot_token") or "").strip()
     s.telegram_chat_id = (tg.get("chat_id") or "").strip()
     s.telegram_every_update = _yes(tg.get("send_every_update", "no"))
+    s.telegram_brief_time = (tg.get("brief_time") or s.telegram_brief_time).strip()
 
-    # On GitHub the token and chat id come from the repo's secret settings,
-    # never from settings.ini (the repo is public).
+    # On GitHub the token comes from the repo's secret settings, never from
+    # settings.ini (the repo is public). The chat id is optional: the bot finds
+    # your chat when you press Start.
     env_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     env_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if env_token and env_chat:
+    if env_token:
         s.telegram_enabled = True
         s.telegram_token = env_token
         s.telegram_chat_id = env_chat

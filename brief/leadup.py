@@ -197,6 +197,7 @@ def build(releases: list[dict], log: list[dict], now: datetime) -> list[dict]:
 
 def one_line(read: dict) -> str:
     """Short text for Telegram."""
+    label = read["label"][:1].lower() + read["label"][1:]
     if read["lean"] is None:
-        return f"Lead-up: {read['label'].lower()}."
-    return f"Lead-up: {read['label'].lower()} ({read['confidence'].lower()})."
+        return f"Lead-up: {label}."
+    return f"Lead-up: {label} ({read['confidence'].lower()})."

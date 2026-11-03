@@ -24,46 +24,41 @@ GitHub Actions runs the app on a schedule (the file `.github/workflows/market-br
 3. Choose branch **gh-pages** and folder **/ (root)**, then click **Save**.
 4. Wait a minute. The dashboard address appears at the top of that page.
 
-**When it updates** (times shown in Manila time):
-- Monday 5am to Saturday 8am: every 30 minutes, at :07 and :37.
-- Weekends: every 3 hours, then every 30 minutes again from 5am Monday.
+**When it updates** (once the 30-minute timer below is set):
+- While gold and Dow futures trade (Monday morning to Saturday morning, Manila time): about every 30 minutes.
+- Weekends: every 3 hours.
 - Around big US releases it stays on, so you get the 15-minute warning and the reaction score on time.
 
-GitHub can start scheduled runs a few minutes late when it's busy. If an update is more than about 75 minutes old, the page marks it in the top bar.
+If an update is more than about 75 minutes old, the page marks it in the top bar.
 
 **Update by hand:** open the **Actions** tab, choose **Market Brief**, then **Run workflow**.
 
-**Reliable timing with a free outside timer.** On the free plan, GitHub treats scheduled runs as best effort and often skips them. A free [cron-job.org](https://cron-job.org) job can press "Run workflow" for you every 30 minutes:
+**Turn on 30-minute updates (one time).** On the free plan, GitHub often skips scheduled runs, so each update lines up the next one itself. The next run waits 30 minutes in an "environment" with a wait timer, which costs nothing:
+1. In the repo, open **Settings → Environments → New environment**.
+2. Name it `timer` and click **Configure environment**.
+3. Under *Deployment protection rules*, tick **Wait timer**, enter `30`, and click **Save protection rules**.
+4. Start the chain once: **Actions → Market Brief → Run workflow**.
 
-1. In GitHub, go to **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Give it access to **only** `market-brief`, with **Actions: Read and write** as its only permission. Copy the token (it starts with `github_pat_`).
-2. In cron-job.org, create a cronjob with:
-   - URL: `https://api.github.com/repos/<your-username>/market-brief/actions/workflows/market-brief.yml/dispatches`
-   - Schedule: every 30 minutes (minutes 7 and 37), Monday to Saturday, time zone Asia/Manila
-   - Request method: `POST`, with the body `{"ref":"main"}`
-   - Headers: `Accept: application/vnd.github+json`, `Authorization: Bearer <your token>`, `X-GitHub-Api-Version: 2026-03-10`, `Content-Type: application/json`
-3. Run a test. A 200 or 204 response means it worked, and a new run appears in the Actions tab.
-
-GitHub's own schedule stays on as a backup. If both start at once, only one update runs. The token can only start or stop this repo's workflows. It expires after the time you choose, so renew it and paste the new one into cron-job.org when it does.
-
-**If a run fails:** GitHub emails you. Open the failed run in the Actions tab, copy the red error text, and paste it into a chat with Claude.
+From then on, every update lines up the next one. GitHub's own schedule stays on as a backup and restarts the chain if it ever stops. Until the wait timer is set, the app won't chain, so it can never run updates back to back.
 
 ---
 
-## B. Telegram alerts (optional)
+## B. Telegram bot (optional)
 
-You'll get a message about 60 and 15 minutes before high-impact US releases, when a release gets scored, and when a bias changes.
+You get:
+- **Release warnings** about 60 and 15 minutes before high-impact US releases, with the lead-up read for NFP, CPI and PCE.
+- **Reaction scores** for each big release, about 30 minutes after it comes out.
+- **Bias changes** for gold or US30, and a heads-up when geopolitical tension turns high.
+- **A session brief** each weekday at 8:30 PM: both biases and what's driving them, the releases coming up, and a link to the dashboard. Change the time with `brief_time` in `settings.ini`.
 
-1. In Telegram, search for **@BotFather**, send `/newbot` and follow the steps. It gives you a token that looks like `123456789:ABCdef...`.
-2. Find your new bot by the name you gave it, and send it any message (for example "hi").
-3. In your browser, open this address with your token pasted in:
-   `https://api.telegram.org/bot<YOUR TOKEN>/getUpdates`
-   Find `"chat":{"id":` followed by a number. That number is your chat id.
-4. In the GitHub repo, open **Settings → Secrets and variables → Actions → New repository secret** and add two secrets:
-   - Name `TELEGRAM_BOT_TOKEN`, with the token as the value
-   - Name `TELEGRAM_CHAT_ID`, with the number as the value
-5. Run the workflow by hand (see above). You should get a "Market Brief is connected" message.
+Setup:
+1. In Telegram, search for **@BotFather**, send `/newbot`, and pick a name and a username (the username must end in `bot`). BotFather replies with a token that looks like `123456789:ABCdef...`.
+2. In this repo, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `TELEGRAM_BOT_TOKEN`, paste the token, and click **Add secret**.
+3. Open your new bot in Telegram (BotFather sends a link) and press **Start**.
 
-**Never put the token in `settings.ini` or any other file here.** The repo is public, and anyone with the token can send messages as your bot.
+Within 30 minutes you'll get "Market Brief is connected." To get it sooner, run the workflow by hand from the Actions tab. The bot locks onto your chat the first time, so other people who find it can't get your alerts.
+
+**Never put the token in `settings.ini` or any other file here.** The repo is public, and anyone with the token can control your bot.
 
 ---
 

@@ -93,11 +93,13 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         memory.setdefault("series", {}).update(series)
         memory.setdefault("snaps", {}).update(snaps)
 
-        headlines, news_problems = N.fetch_headlines(now)
-        if headlines:
-            N.save_cache(headlines)
-        else:
-            headlines = N.load_cache(now)
+        headlines, news_problems = N.recent_cache(now), []
+        if not headlines:
+            headlines, news_problems = N.fetch_headlines(now)
+            if headlines:
+                N.save_cache(headlines, now)
+            else:
+                headlines = N.load_cache(now)
         geo_summary, geo_problem = G.fetch(now)
         if geo_problem:
             problems.append(geo_problem)

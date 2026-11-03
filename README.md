@@ -24,8 +24,8 @@ GitHub Actions runs the app on a schedule (the file `.github/workflows/market-br
 3. Choose branch **gh-pages** and folder **/ (root)**, then click **Save**.
 4. Wait a minute. The dashboard address appears at the top of that page.
 
-**When it updates** (once the 30-minute timer below is set):
-- While gold and Dow futures trade (Monday morning to Saturday morning, Manila time): about every 30 minutes.
+**When it updates** (once the timer below is set):
+- While gold and Dow futures trade (Monday morning to Saturday morning, Manila time): every 15 or 30 minutes, whichever timer you set.
 - Weekends: every 3 hours.
 - Around big US releases it stays on, so you get the 15-minute warning and the reaction score on time.
 
@@ -33,12 +33,12 @@ If an update is more than about 75 minutes old, the page marks it in the top bar
 
 **Update by hand:** open the **Actions** tab, choose **Market Brief**, then **Run workflow**.
 
-**Turn on 30-minute updates (one time).** On the free plan, GitHub often skips scheduled runs, so each update lines up the next one itself. The next run waits 30 minutes in an "environment" with a wait timer, which costs nothing:
+**Turn on regular updates (one time).** On the free plan, GitHub often skips scheduled runs, so each update lines up the next one itself. The next run waits in an "environment" with a wait timer, which costs nothing:
 1. In the repo, open **Settings → Environments**. If `timer` is already listed, click it. If not, click **New environment**, name it `timer`, and click **Configure environment**.
-2. Under *Deployment protection rules*, tick **Wait timer**, enter `30`, and click **Save protection rules**.
+2. Under *Deployment protection rules*, tick **Wait timer**, enter `15` (or `30` for fewer updates), and click **Save protection rules**. You can change it any time.
 3. Start the chain once: **Actions → Market Brief → Run workflow**.
 
-From then on, every update lines up the next one. GitHub's own schedule stays on as a backup and restarts the chain if it ever stops. Until the wait timer is set, the app won't chain, so it can never run updates back to back.
+From then on, every update lines up the next one. GitHub's own schedule stays on as a backup and restarts the chain if it ever stops. Until a wait timer of at least 10 minutes is set, the app won't chain, so it can never run updates back to back. With a 15-minute timer, headlines are refreshed every other update, so Google News isn't asked too often.
 
 ---
 

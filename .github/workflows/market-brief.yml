@@ -1,8 +1,8 @@
 name: Market Brief
 
-# How updates keep coming every 30 minutes:
+# How updates keep coming every 15 or 30 minutes:
 # Each update, when it finishes, lines up the next one. That next run waits
-# in the "timer" environment, which has a 30-minute wait timer (set in
+# in the "timer" environment, which has a 15- or 30-minute wait timer (set in
 # Settings > Environments). Waiting there costs no Actions minutes.
 # GitHub's own schedule below is a backup that restarts the chain if it
 # ever stops. On the free plan GitHub often skips scheduled runs, which is
@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       chained:
-        description: "Wait 30 minutes first (used by the update chain)"
+        description: "Wait for the timer first (used by the update chain)"
         type: boolean
         default: false
 
@@ -42,8 +42,8 @@ jobs:
           created=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq .created_at)
           waited=$(( ( $(date -u +%s) - $(date -u -d "$created" +%s) ) / 60 ))
           echo "Waited $waited minutes."
-          if [ "$waited" -lt 25 ]; then
-            echo "::error::The 'timer' environment has no 30-minute wait timer. Stopping the chain."
+          if [ "$waited" -lt 10 ]; then
+            echo "::error::The 'timer' environment has no wait timer (15 or 30 minutes). Stopping the chain."
             exit 1
           fi
 
@@ -83,14 +83,14 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # Safety: only chain if the 30-minute wait timer is really set,
+          # Safety: only chain if a wait timer of at least 10 minutes is set,
           # otherwise updates would run back to back.
           wait=$(gh api "repos/$REPO/environments/timer" \
                    --jq '[.protection_rules[]? | select(.type=="wait_timer") | .wait_timer][0] // 0' 2>/dev/null) || wait=0
           case "$wait" in ''|*[!0-9]*) wait=0 ;; esac
           echo "Wait timer: $wait minutes."
-          if [ "$wait" -lt 25 ]; then
-            echo "::warning::Set a 30-minute wait timer on the 'timer' environment (Settings > Environments) to get updates every 30 minutes."
+          if [ "$wait" -lt 10 ]; then
+            echo "::warning::Set a wait timer of 15 or 30 minutes on the 'timer' environment (Settings > Environments) to get regular updates."
             exit 0
           fi
           # Keep a single chain: skip if another update is already lined up.
@@ -103,7 +103,7 @@ jobs:
           fi
           gh api -X POST "repos/$REPO/actions/workflows/market-brief.yml/dispatches" \
             -f ref=main -f "inputs[chained]=true" --silent
-          echo "Next update lined up for about 30 minutes from now."
+          echo "Next update lined up for about $wait minutes from now."
 
       # GitHub switches off schedules in public repos after 60 days without
       # activity. One call a day keeps the backup schedule going.

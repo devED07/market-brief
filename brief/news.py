@@ -164,21 +164,36 @@ def fetch_headlines(now: datetime | None = None, hours: int = 12, limit: int = 3
 CACHE_FILE = DATA_DIR / "headlines_cache.json"
 
 
-def save_cache(headlines: list[dict]) -> None:
+def save_cache(headlines: list[dict], now: datetime) -> None:
     rows = [dict(h, time=h["time"].isoformat()) for h in headlines]
-    CACHE_FILE.write_text(json.dumps(rows), encoding="utf-8")
+    CACHE_FILE.write_text(json.dumps({"saved": now.isoformat(), "items": rows}), encoding="utf-8")
+
+
+def _read_cache() -> tuple[datetime | None, list[dict]]:
+    try:
+        data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        saved, rows = (data.get("saved"), data.get("items", [])) if isinstance(data, dict) else (None, data)
+        for r in rows:
+            r["time"] = datetime.fromisoformat(r["time"])
+        return (datetime.fromisoformat(saved) if saved else None), rows
+    except Exception:
+        return None, []
 
 
 def load_cache(now: datetime, max_age_h: int = 3) -> list[dict]:
     """Last good headlines, used when Google News doesn't answer."""
-    try:
-        rows = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-        for r in rows:
-            r["time"] = datetime.fromisoformat(r["time"])
-        if rows and now - max(r["time"] for r in rows) < timedelta(hours=max_age_h):
-            return rows
-    except Exception:
-        pass
+    _, rows = _read_cache()
+    if rows and now - max(r["time"] for r in rows) < timedelta(hours=max_age_h):
+        return rows
+    return []
+
+
+def recent_cache(now: datetime, max_age_min: int = 25) -> list[dict]:
+    """Headlines fetched in the last 25 minutes. With 15-minute updates, every
+    other run reuses them, so Google News isn't asked too often."""
+    saved, rows = _read_cache()
+    if saved and rows and now - saved < timedelta(minutes=max_age_min):
+        return rows
     return []
 
 

@@ -34,10 +34,9 @@ If an update is more than about 75 minutes old, the page marks it in the top bar
 **Update by hand:** open the **Actions** tab, choose **Market Brief**, then **Run workflow**.
 
 **Turn on 30-minute updates (one time).** On the free plan, GitHub often skips scheduled runs, so each update lines up the next one itself. The next run waits 30 minutes in an "environment" with a wait timer, which costs nothing:
-1. In the repo, open **Settings → Environments → New environment**.
-2. Name it `timer` and click **Configure environment**.
-3. Under *Deployment protection rules*, tick **Wait timer**, enter `30`, and click **Save protection rules**.
-4. Start the chain once: **Actions → Market Brief → Run workflow**.
+1. In the repo, open **Settings → Environments**. If `timer` is already listed, click it. If not, click **New environment**, name it `timer`, and click **Configure environment**.
+2. Under *Deployment protection rules*, tick **Wait timer**, enter `30`, and click **Save protection rules**.
+3. Start the chain once: **Actions → Market Brief → Run workflow**.
 
 From then on, every update lines up the next one. GitHub's own schedule stays on as a backup and restarts the chain if it ever stops. Until the wait timer is set, the app won't chain, so it can never run updates back to back.
 

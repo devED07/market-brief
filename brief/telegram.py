@@ -199,14 +199,24 @@ def process(settings, brief: dict, now) -> str | None:
         messages.append("✅ <b>Market Brief is connected.</b> You'll get release warnings, reaction "
                         "scores, bias changes, and a session brief each weekday evening.")
 
-    # 1. Bias changed since the last run
+    # 1. Bias changed. A new label has to hold for two updates in a row
+    # before it's announced, so a score hovering at a boundary doesn't ping
+    # you every 15 minutes.
     changed = []
+    pending = state.setdefault("pending", {})
     for key, name in (("gold", "Gold"), ("us30", "US30")):
         label = brief["bias"][key]["label"]
         old = state["labels"].get(key)
-        if old and old != label:
+        if not old:
+            state["labels"][key] = label
+        elif label == old:
+            pending.pop(key, None)
+        elif pending.get(key) == label:
             changed.append(f"{name}: {old} → <b>{label}</b>")
-        state["labels"][key] = label
+            state["labels"][key] = label
+            pending.pop(key, None)
+        else:
+            pending[key] = label
     if changed:
         messages.append("Bias changed\n" + "\n".join(changed))
 

@@ -10,6 +10,15 @@ import pandas as pd
 NY = ZoneInfo("America/New_York")
 
 
+# Made-up actual numbers and gasoline trend, standing in for FRED.
+ACTUALS = {
+    "JOLTS Job Openings": "7.19M",
+    "ADP Non-Farm Employment Change": "58K",
+}
+GASOLINE = {"key": "cpi", "name": "Gasoline prices", "weight": 0.4, "hawk": 0.9,
+            "text": "+2.7% vs the month before"}
+
+
 def _demo_now() -> datetime:
     """A Thursday, 7:52am New York (8:52pm Manila), with CPI 38 minutes away."""
     real = datetime.now(NY)
@@ -59,15 +68,15 @@ def build():
 
     # Reactions baked into the fake prices: (time, minutes, {key: % move})
     reactions = [
-        (_ny(now, -3, 10, 0), 15, {"treasury_10y": +0.18, "dollar": -0.22, "gold": +0.55, "us30": +0.20}),
+        (_ny(now, -3, 10, 0), 15, {"treasury_10y": +0.18, "dollar": -0.22, "gold": +0.55, "us30": +0.20, "us100": +0.30}),
         (_ny(now, -2, 10, 0), 15, {"treasury_10y": -0.02, "dollar": +0.03, "gold": -0.05, "us30": +0.02}),
         (_ny(now, -2, 8, 30), 15, {"treasury_10y": -0.08, "dollar": +0.12, "gold": -0.20, "us30": -0.05}),
         (_ny(now, -1, 8, 15), 15, {"treasury_10y": -0.15, "dollar": +0.24, "gold": -0.40, "us30": -0.15}),
-        (_ny(now, -1, 10, 0), 15, {"treasury_10y": -0.30, "dollar": +0.42, "gold": -0.90, "us30": -0.45}),
+        (_ny(now, -1, 10, 0), 15, {"treasury_10y": -0.30, "dollar": +0.42, "gold": -0.90, "us30": -0.45, "us100": -0.70}),
     ]
-    targets = {"gold": 4282.4, "us30": 47655.0, "dollar": 100.21, "treasury_10y": 111.92, "vix": 17.84}
-    noise = {"gold": 0.0004, "us30": 0.0003, "dollar": 0.00008, "treasury_10y": 0.00005, "vix": 0.002}
-    drift_24h = {"gold": -0.0010, "us30": -0.0015, "dollar": +0.0005, "treasury_10y": -0.0004, "vix": +0.06}
+    targets = {"gold": 4282.4, "us30": 47655.0, "us100": 25480.0, "dollar": 100.21, "treasury_10y": 111.92, "vix": 17.84}
+    noise = {"gold": 0.0004, "us30": 0.0003, "us100": 0.0004, "dollar": 0.00008, "treasury_10y": 0.00005, "vix": 0.002}
+    drift_24h = {"gold": -0.0010, "us30": -0.0015, "us100": -0.0022, "dollar": +0.0005, "treasury_10y": -0.0004, "vix": +0.06}
 
     idx = pd.date_range(now - timedelta(days=7), now, freq="5min", tz="UTC")
     idx = idx[[_open(t) for t in idx]]

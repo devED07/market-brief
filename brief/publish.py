@@ -19,7 +19,7 @@ from pathlib import Path
 from .config import DATA_DIR
 
 BRANCH = "gh-pages"
-STATE_FILES = ("alert_state.json", "calendar_cache.json", "headlines_cache.json", "release_log.json", "geo_cache.json", "geo_history.json")
+STATE_FILES = ("alert_state.json", "calendar_cache.json", "headlines_cache.json", "release_log.json", "actuals.json", "geo_cache.json", "geo_history.json")
 BOT_NAME = "market-brief-bot"
 BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 

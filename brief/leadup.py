@@ -3,9 +3,10 @@
 Example: ISM, JOLTS, ADP and jobless claims come out before NFP. If they
 mostly surprised hot, there's a tilt toward a strong NFP too.
 
-The free calendar has no actual numbers, so each lead-in is read from how
-the market reacted to it (the same verdict as the release list): yields and
-the dollar up = it came in hot, down = it came in cold. Weights say how much
+Each lead-in is read from its actual number against the forecast when FRED
+has it (see fred.py). Otherwise it is read from how the market reacted to it
+(the same verdict as the release list): yields and the dollar up = it came
+in hot, down = it came in cold. Weights say how much
 each lead-in tends to tell you about the big one. Scored releases are kept
 for 45 days, so lead-ins from earlier weeks still count.
 """
@@ -37,6 +38,8 @@ TARGETS = [
         ],
         "hot": "a strong NFP",
         "cold": "a weak NFP",
+        # Usual first reaction to a strong number: +1 up, -1 down, 0 mixed.
+        "if_hot": {"gold": -1.0, "us30": 0.0, "us100": -0.5},
         "note": "Earlier jobs data only loosely predicts NFP, and ADP is a weak guide month to month. "
                 "Treat this as a tilt, not a call.",
     },
@@ -56,8 +59,9 @@ TARGETS = [
         ],
         "hot": "a hot CPI",
         "cold": "a cool CPI",
-        "note": "Price gauges in ISM and PPI give a partial read. Gasoline prices also matter a lot, "
-                "and they aren't tracked here.",
+        "if_hot": {"gold": -1.0, "us30": -1.0, "us100": -1.0},
+        "note": "Price gauges in ISM and PPI give a partial read. Gasoline prices also matter a lot; "
+                "they are included when the FRED key is set.",
     },
     {
         "key": "pce",
@@ -72,6 +76,7 @@ TARGETS = [
         ],
         "hot": "a hot PCE",
         "cold": "a cool PCE",
+        "if_hot": {"gold": -1.0, "us30": -1.0, "us100": -1.0},
         "note": "Forecasters build the PCE forecast from CPI and PPI, so most of this is usually "
                 "already in the forecast. Big PCE surprises are rare.",
     },
@@ -98,8 +103,31 @@ def _lead_match(rel: dict, target: dict) -> tuple[str, float] | None:
     for word, name, weight in target["leads"]:
         if any(word in t for t in _titles(rel)) and not _is_target(rel, target):
             if best is None or weight > best[1]:
-                best = (name, weight)
+                best = (name, weight, word)
     return best
+
+
+def _lead_value(entry: dict, word: str) -> tuple[float | None, str]:
+    """The lead-in's surprise: actual vs forecast if FRED had the number,
+    otherwise the market's reaction. Returns (value, numbers to show)."""
+    hits = [(title, d) for title, d in (entry.get("data") or {}).items() if word in title.lower()]
+    if not hits:
+        return entry.get("hawk"), ""
+    value = sum(d["z"] for _, d in hits) / len(hits)
+    if len(hits) == 1:
+        return value, hits[0][1]["text"]
+    return value, ", ".join(f"{t.replace(' m/m', '')} {d['text'].replace(' forecast', '')}" for t, d in hits)
+
+
+def reaction_text(target: dict, side: str) -> str:
+    """'gold down, US30 mixed, US100 leans down' for a hot or cold outcome."""
+    flip = 1 if side == "hot" else -1
+    bits = []
+    for key, name in (("gold", "gold"), ("us30", "US30"), ("us100", "US100")):
+        v = target["if_hot"][key] * flip
+        word = "mixed" if abs(v) < 0.25 else ("up" if v > 0 else "down")
+        bits.append(f"{name} {'leans ' if 0.25 <= abs(v) < 0.75 else ''}{word}")
+    return ", ".join(bits)
 
 
 # ------------------------------------------------------------------ log
@@ -118,7 +146,8 @@ def update_log(releases: list[dict], now: datetime, persist: bool = True) -> lis
     """Adds newly scored releases to the log and returns the full log."""
     log = {r["time"].isoformat(): r for r in (load_log() if persist else [])}
     for rel in releases:
-        if rel.get("status") != "done" or rel.get("hawk") is None:
+        data = rel.get("data") or {}
+        if rel.get("status") != "done" or (rel.get("hawk") is None and not data):
             continue
         log[rel["time"].isoformat()] = {
             "time": rel["time"],
@@ -126,6 +155,7 @@ def update_log(releases: list[dict], now: datetime, persist: bool = True) -> lis
             "titles": [e["title"] for e in rel["events"]],
             "hawk": rel["hawk"],
             "verdict": rel["verdict"],
+            "data": data,
         }
     rows = sorted((r for r in log.values() if now - r["time"] < timedelta(days=KEEP_DAYS)),
                   key=lambda r: r["time"])
@@ -137,15 +167,22 @@ def update_log(releases: list[dict], now: datetime, persist: bool = True) -> lis
 
 # ------------------------------------------------------------------ reads
 
-def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], now: datetime) -> dict:
+def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], now: datetime,
+              extras: list[dict]) -> dict:
     start = rel["time"] - timedelta(days=target["lookback_days"])
     scored, pending = [], []
     for entry in log:
         if start <= entry["time"] < rel["time"]:
             m = _lead_match(entry, target)
             if m:
+                value, text = _lead_value(entry, m[2])
+                if value is None:
+                    continue
                 scored.append({"name": m[0], "weight": m[1], "time": entry["time"],
-                               "hawk": entry["hawk"], "verdict": entry["verdict"]})
+                               "hawk": value, "verdict": entry.get("verdict", ""), "text": text})
+    for x in extras:  # leads that aren't calendar events, such as gasoline prices
+        if x["key"] == target["key"] and x["time"] < rel["time"]:
+            scored.append(dict(x))
     for r in releases:
         if r["status"] in ("upcoming", "waiting") and r["time"] < rel["time"] and not r.get("all_day"):
             m = _lead_match(r, target)
@@ -153,7 +190,7 @@ def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], no
                 pending.append({"name": m[0], "weight": m[1], "time": r["time"], "status": r["status"]})
 
     out = {"target": target, "release": rel, "scored": scored, "pending": pending,
-           "lean": None, "label": "Nothing to go on yet", "tone": "flat", "confidence": ""}
+           "lean": None, "side": None, "label": "Nothing to go on yet", "tone": "flat", "confidence": ""}
     if not scored:
         if pending:
             out["label"] = "Waiting for the lead-in data"
@@ -172,6 +209,7 @@ def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], no
         side = target["hot"] if lean > 0 else target["cold"]
         out["label"] = f"{'Points to' if abs(lean) >= 0.8 else 'Leans toward'} {side}"
         out["tone"] = "bear" if lean > 0 else "bull"
+        out["side"] = "hot" if lean > 0 else "cold"
 
     if target["key"] == "pce" and any(s["name"] == "CPI" for s in scored):
         out["confidence"] = "Fairly reliable"
@@ -182,7 +220,7 @@ def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], no
     return out
 
 
-def build(releases: list[dict], log: list[dict], now: datetime) -> list[dict]:
+def build(releases: list[dict], log: list[dict], now: datetime, extras: list[dict] | None = None) -> list[dict]:
     """One read per upcoming NFP / CPI / PCE in the calendar."""
     reads = []
     for rel in releases:
@@ -190,7 +228,7 @@ def build(releases: list[dict], log: list[dict], now: datetime) -> list[dict]:
             continue
         for target in TARGETS:
             if _is_target(rel, target):
-                reads.append(_read_one(target, rel, log, releases, now))
+                reads.append(_read_one(target, rel, log, releases, now, extras or []))
                 break
     return reads
 
@@ -200,4 +238,7 @@ def one_line(read: dict) -> str:
     label = read["label"][:1].lower() + read["label"][1:]
     if read["lean"] is None:
         return f"Lead-up: {label}."
-    return f"Lead-up: {label} ({read['confidence'].lower()})."
+    text = f"Lead-up: {label} ({read['confidence'].lower()})."
+    if read.get("side"):
+        text += f" Usual first reaction if so: {reaction_text(read['target'], read['side'])}."
+    return text

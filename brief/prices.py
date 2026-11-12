@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore", module=r"yfinance(\.|$)")
 LABELS = {
     "gold": "Gold",
     "us30": "US30",
+    "us100": "US100",
     "dollar": "Dollar index",
     "treasury_10y": "10Y T-note",
     "vix": "VIX",

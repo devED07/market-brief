@@ -118,10 +118,10 @@ def _t(dt: datetime, tz, fmt: str = "%I:%M %p") -> str:
 
 
 def _summary(brief: dict, tz) -> str:
-    g, u = brief["bias"]["gold"], brief["bias"]["us30"]
     lines = [
-        f"<b>Gold</b>: {g['label']} ({g['score']:+.1f})" + (", price disagrees" if g.get("warning") else ""),
-        f"<b>US30</b>: {u['label']} ({u['score']:+.1f})" + (", price disagrees" if u.get("warning") else ""),
+        f"<b>{name}</b>: {inst['label']} ({inst['score']:+.1f})" + (", price disagrees" if inst.get("warning") else "")
+        for name, inst in (("Gold", brief["bias"]["gold"]), ("US30", brief["bias"]["us30"]),
+                           ("US100", brief["bias"]["us100"]))
     ]
     nxt = brief.get("next_release")
     if nxt:
@@ -137,9 +137,9 @@ def _top_drivers(inst: dict, n: int = 2) -> str:
 
 
 def session_brief(brief: dict, tz, now: datetime) -> str:
-    g, u = brief["bias"]["gold"], brief["bias"]["us30"]
+    g, u, n = brief["bias"]["gold"], brief["bias"]["us30"], brief["bias"]["us100"]
     lines = [f"🗒 <b>Session brief</b>, {_t(now, tz, '%a %b %d')}", ""]
-    for name, inst in (("Gold", g), ("US30", u)):
+    for name, inst in (("Gold", g), ("US30", u), ("US100", n)):
         lines.append(f"<b>{name}</b>: {inst['label']} ({inst['score']:+.1f})")
         lines.append(f"   Driven by {_top_drivers(inst)}")
         if inst.get("warning"):
@@ -204,7 +204,7 @@ def process(settings, brief: dict, now) -> str | None:
     # you every 15 minutes.
     changed = []
     pending = state.setdefault("pending", {})
-    for key, name in (("gold", "Gold"), ("us30", "US30")):
+    for key, name in (("gold", "Gold"), ("us30", "US30"), ("us100", "US100")):
         label = brief["bias"][key]["label"]
         old = state["labels"].get(key)
         if not old:
@@ -226,7 +226,7 @@ def process(settings, brief: dict, now) -> str | None:
         old_geo = state["labels"].get("geo")
         if geo["level"] == "high" and old_geo and old_geo != "high":
             messages.append(f"🌍 Geopolitical tension is <b>high</b>: conflict news at {geo['ratio']:.1f}x "
-                            "its 30-day normal. Usually supportive for gold, a headwind for US30.")
+                            "its 30-day normal. Usually supportive for gold, a headwind for US30 and US100.")
         state["labels"]["geo"] = geo["level"]
 
     # 2. Heads-up before high-impact releases (about 60 and 15 minutes out)
@@ -256,7 +256,8 @@ def process(settings, brief: dict, now) -> str | None:
                 state["sent"].append(key)
                 messages.append(
                     f"📊 {rel['headline']}: <b>{rel['verdict']}</b>\n"
-                    f"Gold {rel['gold_pct'] or 0:+.2f}%, US30 {rel['us30_pct'] or 0:+.2f}% "
+                    f"Gold {rel['gold_pct'] or 0:+.2f}%, US30 {rel['us30_pct'] or 0:+.2f}%, "
+                    f"US100 {rel.get('us100_pct') or 0:+.2f}% "
                     f"in the first {rel['window_min']} min"
                 )
 

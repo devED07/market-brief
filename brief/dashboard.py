@@ -10,7 +10,7 @@ CSS = """
 :root{
   --bg:#161D27; --panel:#1C2531; --panel-2:#222D3B; --line:#2E3A4A;
   --text:#E3E7ED; --muted:#8E99AA; --faint:#5F6B7D;
-  --gold:#D1A84A; --us30:#86A9CF;
+  --gold:#D1A84A; --us30:#86A9CF; --us100:#7FC4B8;
   --bull:#5BB585; --bear:#E26A5E; --flat:#A9B2BF; --event:#B793E6;
   --font:"Archivo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -44,13 +44,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
 .banner .count{font-weight:800;font-stretch:80%;font-size:20px;color:var(--event)}
 
 /* bias */
-.bias{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}
+.bias{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}
 .inst{background:var(--panel);border-radius:6px;padding:18px 20px 16px;border-top:3px solid var(--c)}
-.inst.gold{--c:var(--gold)} .inst.us30{--c:var(--us30)}
+.inst.gold{--c:var(--gold)} .inst.us30{--c:var(--us30)} .inst.us100{--c:var(--us100)}
 .inst-head{display:flex;justify-content:space-between;align-items:baseline}
 .inst-name{font-weight:700;font-size:16px;color:var(--c)}
 .inst-sym{color:var(--faint);font-size:13px}
-.verdict{font-weight:800;font-stretch:68%;font-size:clamp(40px,5.4vw,60px);line-height:1;margin:14px 0 6px;letter-spacing:-.005em}
+.verdict{font-weight:800;font-stretch:68%;font-size:clamp(32px,3.5vw,44px);line-height:1;margin:14px 0 6px;letter-spacing:-.005em}
 .tone-bull{color:var(--bull)} .tone-bear{color:var(--bear)} .tone-flat{color:var(--flat)}
 .scoreline{display:flex;align-items:center;gap:12px;margin:12px 0 4px}
 .scorenum{font-weight:700;font-size:15px;min-width:74px}
@@ -64,9 +64,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
   border:1px solid color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
 .drivers{width:100%;border-collapse:collapse;font-size:14px}
 .drivers td{padding:7px 0;border-top:1px solid var(--line);vertical-align:top}
-.drivers .dn{font-weight:600;padding-right:10px;white-space:nowrap}
-.drivers .dd{color:var(--muted);padding-right:12px}
-.drivers .db{width:84px;padding-top:12px}
+.drivers .dn{font-weight:600;padding-right:10px}
+.drivers .dd{display:block;color:var(--muted);font-weight:400;font-size:13px;line-height:1.4;margin-top:1px}
+.drivers .db{width:64px;padding-top:12px}
 .drivers .dp{width:44px;text-align:right;font-weight:600}
 .minibar{position:relative;height:6px;background:var(--panel-2);border-radius:3px}
 .minibar i{position:absolute;top:0;bottom:0;border-radius:3px}
@@ -108,6 +108,13 @@ h2{font-size:17px;font-weight:700;margin:0 0 4px}
 .lead-rows tr.pending td{color:var(--faint)}
 .lead p{margin:10px 0 0;font-size:13px;color:var(--muted);max-width:70ch}
 .lead p.fine{color:var(--faint);font-size:12px;margin-top:6px}
+.lead-rows .ln{display:block;color:var(--muted);font-size:12.5px}
+.lead-sc{width:100%;border-collapse:collapse;font-size:14px;margin-top:12px}
+.lead-sc caption{text-align:left;color:var(--faint);font-size:12px;padding-bottom:4px}
+.lead-sc td{padding:6px 8px 6px 0;border-top:1px solid var(--line);white-space:nowrap}
+.lead-sc td:first-child{color:var(--muted)}
+.lead-sc tr.on td:first-child{color:var(--text);font-weight:600}
+.lead-sc .soft{opacity:.7}
 
 /* lower grid */
 .grid2{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}
@@ -154,10 +161,13 @@ footer{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);color:v
 footer p{margin:4px 0;max-width:80ch}
 .problems{color:var(--bear)}
 
+@media (max-width:1020px){
+  .bias{grid-template-columns:1fr}
+  .verdict{font-size:clamp(36px,7vw,52px)}
+}
 @media (max-width:860px){
   .wrap{padding:16px 16px 40px}
-  .bias,.grid2{grid-template-columns:1fr}
-  .drivers .dd{display:none}
+  .grid2{grid-template-columns:1fr}
   .lane{grid-template-columns:64px 1fr}
   .axis{margin-left:64px}
   .lanes .nowwrap{left:64px}
@@ -257,7 +267,7 @@ def _num(key: str, v: float | None) -> str:
         return "n/a"
     if key == "gold":
         return f"{v:,.1f}"
-    if key == "us30":
+    if key in ("us30", "us100"):
         return f"{v:,.0f}"
     return f"{v:,.2f}"
 
@@ -292,7 +302,7 @@ def _instrument(key: str, name: str, symbol: str, data: dict) -> str:
     rows = []
     for d in data["drivers"]:
         rows.append(
-            f'<tr><td class="dn">{escape(d["name"])}</td><td class="dd">{escape(d["detail"])}</td>'
+            f'<tr><td class="dn">{escape(d["name"])}<span class="dd">{escape(d["detail"])}</span></td>'
             f'<td class="db">{_bar_html(d["points"], 4)}</td><td class="dp">{_signed(d["points"])}</td></tr>'
         )
     return f"""
@@ -322,7 +332,7 @@ def _banners(brief: dict, tz, now: datetime) -> str:
     if not mkt["open"]:
         when = _t(mkt["reopen"], tz, "%A %I:%M %p").replace(" 0", " ")
         what = "for the weekend" if mkt["reason"] == "weekend" else "for the daily one-hour break"
-        out.append(f'<div class="banner closed"><strong>Gold and US30 futures are closed {what}.</strong>'
+        out.append(f'<div class="banner closed"><strong>Gold, US30 and US100 futures are closed {what}.</strong>'
                    f'<span>They reopen {when} your time. Changes shown are from the last session.</span></div>')
 
     for rel in brief["releases"]:
@@ -435,6 +445,8 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
         when = _t(rel["time"], tz, "%A") + " " + _t(rel["time"], tz)
         if ev["forecast"]:
             when += f", forecast {escape(ev['forecast'])}"
+        if ev["previous"]:
+            when += f", previous {escape(ev['previous'])}"
         rows = []
         items = [dict(s, kind="done") for s in read["scored"]] + [dict(p, kind="pending") for p in read["pending"]]
         items.sort(key=lambda x: x["time"])
@@ -444,7 +456,8 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
                 h = it["hawk"]
                 tone = "tone-bear" if h >= 0.3 else "tone-bull" if h <= -0.3 else "tone-flat"
                 hot_cold = "came in hot" if h >= 0.3 else "came in cold" if h <= -0.3 else "in line"
-                rows.append(f'<tr><td class="ld">{day}</td><td>{escape(it["name"])}</td>'
+                nums = f'<span class="ln">{escape(it["text"])}</span>' if it.get("text") else ""
+                rows.append(f'<tr><td class="ld">{day}</td><td>{escape(it["name"])}{nums}</td>'
                             f'<td class="lv {tone}">{hot_cold}</td></tr>')
             else:
                 label = "reading the reaction" if it["status"] == "waiting" else "still to come"
@@ -455,11 +468,11 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
         meaning = ""
         if read["lean"] is not None and abs(read["lean"]) >= 0.3:
             if read["lean"] > 0:
-                meaning = ("Hot data usually lifts yields and the dollar, which weighs on gold and US30. "
+                meaning = ("Hot data usually lifts yields and the dollar, which weighs on gold, US30 and US100. "
                            f"If {t['name']} confirms it, some of that may already be priced in. "
                            "A surprise the other way would likely move price more.")
             else:
-                meaning = ("Soft data usually pulls yields and the dollar down, which helps gold. For US30 it "
+                meaning = ("Soft data usually pulls yields and the dollar down, which helps gold. For US30 and US100 it "
                            "depends on whether the market reads it as rate cuts (good) or a slowdown (bad). "
                            f"If {t['name']} confirms it, some of that may already be priced in. "
                            "A surprise the other way would likely move price more.")
@@ -471,6 +484,7 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
   <div class="lead-label tone-{read['tone']}">{escape(read['label'])}</div>
   {conf}
   {table}
+  {_scenarios(t, read.get("side"))}
   {meaning_html}
   <p class="fine">{escape(t['note'])}</p>
 </article>""")
@@ -478,9 +492,30 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
     return f"""
 <section aria-labelledby="lead-h">
   <h2 id="lead-h">Lead-up to the big releases</h2>
-  <p class="sub">How the smaller releases before it came in, read from the market's reaction to each, and what that hints about the big one.</p>
+  <p class="sub">How the smaller releases before it came in (the actual number against forecast where FRED has it, otherwise the market's reaction), what that hints about the big one, and how each market usually reacts.</p>
   <div class="leads">{''.join(cards)}</div>
 </section>"""
+
+
+def _scenarios(target: dict, side: str | None) -> str:
+    """How each market usually reacts first to a hot or a cold number. The
+    row the lead-up leans toward is marked."""
+    def cell(name: str, v: float) -> str:
+        if abs(v) < 0.25:
+            return f'<td class="tone-flat">{name} mixed</td>'
+        soft = " soft" if abs(v) < 0.75 else ""
+        return (f'<td class="tone-bull{soft}">{name} ▲</td>' if v > 0
+                else f'<td class="tone-bear{soft}">{name} ▼</td>')
+
+    rows = []
+    for key, flip, label in (("hot", 1, target["hot"]), ("cold", -1, target["cold"])):
+        cells = "".join(cell(name, target["if_hot"][k] * flip)
+                        for k, name in (("gold", "Gold"), ("us30", "US30"), ("us100", "US100")))
+        mark = " (lead-up leans here)" if side == key else ""
+        label = label.split(" ", 1)[1]  # "a hot CPI" -> "hot CPI"
+        rows.append(f'<tr class="{"on" if side == key else ""}"><td>If {escape(label)}{mark}</td>{cells}</tr>')
+    return (f'<table class="lead-sc"><caption>Usual first reaction. Faded arrow = weaker tendency.</caption>'
+            f'{"".join(rows)}</table>')
 
 
 def _short(title: str) -> str:
@@ -500,8 +535,10 @@ def _releases(brief: dict, tz, now: datetime) -> str:
             last_day = day
         ev = r["events"][0]
         meta = []
+        if ev.get("actual"):
+            meta.append(f"<b>Actual {escape(ev['actual'])}</b>")
         if ev["forecast"]:
-            meta.append(f"Forecast {escape(ev['forecast'])}")
+            meta.append(f"{'forecast' if meta else 'Forecast'} {escape(ev['forecast'])}")
         if ev["previous"]:
             meta.append(f"previous {escape(ev['previous'])}")
         if r["others"]:
@@ -519,10 +556,11 @@ def _releases(brief: dict, tz, now: datetime) -> str:
             if r["hawk"] is not None:
                 tone = "tone-bear" if r["hawk"] >= 0.3 else "tone-bull" if r["hawk"] <= -0.3 else "tone-flat"
             moves = ""
-            if r["gold_pct"] is not None or r["us30_pct"] is not None:
+            if r["gold_pct"] is not None or r["us30_pct"] is not None or r.get("us100_pct") is not None:
                 g = "n/a" if r["gold_pct"] is None else f'{r["gold_pct"]:+.2f}%'
                 u = "n/a" if r["us30_pct"] is None else f'{r["us30_pct"]:+.2f}%'
-                moves = f'<span class="moves">Gold {g}, US30 {u}</span>'
+                n = "n/a" if r.get("us100_pct") is None else f'{r["us100_pct"]:+.2f}%'
+                moves = f'<span class="moves">Gold {g}, US30 {u}, US100 {n}</span>'
             right = f'<span class="v {tone}">{escape(r["verdict"])}</span>{moves}'
         imp = "imp" if r["impact"] == "High" else "imp med"
         out.append(
@@ -535,7 +573,7 @@ def _releases(brief: dict, tz, now: datetime) -> str:
 
 def _markets(brief: dict, now: datetime) -> str:
     rows = []
-    for key in ("gold", "us30", "dollar", "treasury_10y", "vix"):
+    for key in ("gold", "us30", "us100", "dollar", "treasury_10y", "vix"):
         s = brief["snaps"].get(key)
         name = LABELS[key]
         hint = ""
@@ -545,6 +583,8 @@ def _markets(brief: dict, now: datetime) -> str:
             hint = '<span class="hint">Futures, a few dollars above spot</span>'
         elif key == "us30":
             hint = '<span class="hint">Dow futures</span>'
+        elif key == "us100":
+            hint = '<span class="hint">Nasdaq 100 futures</span>'
         if not s:
             rows.append(f'<tr><td><span class="nm">{name}</span>{hint}</td><td colspan="4" class="na">No data</td></tr>')
             continue
@@ -630,6 +670,7 @@ def render(brief: dict) -> str:
 <div class="bias">
 {_instrument("gold", "Gold", syms["gold"], brief["bias"]["gold"])}
 {_instrument("us30", "US30", syms["us30"], brief["bias"]["us30"])}
+{_instrument("us100", "US100", syms["us100"], brief["bias"]["us100"])}
 </div>
 
 {_night(brief, tz)}
@@ -639,7 +680,7 @@ def render(brief: dict) -> str:
 <section class="grid2">
   <div>
     <h2>US releases</h2>
-    <p class="sub">High and medium impact, in your time. The verdict is how yields and the dollar reacted.</p>
+    <p class="sub">High and medium impact, in your time. The verdict is how yields and the dollar reacted. Actual numbers come from FRED when it has them.</p>
     <div class="panel">{_releases(brief, tz, now)}</div>
   </div>
   <div>
@@ -658,7 +699,7 @@ def render(brief: dict) -> str:
 <footer>
   {problems}
   <p>Bias combines how big US releases moved yields and the dollar this week, the 24-hour dollar and yield trend, VIX, headline tone, geopolitical tension, and each market's own recent trend. It doesn't read chart patterns or levels, so your setup still decides entries.</p>
-  <p>Personal tool, not financial advice. Data: Forex Factory calendar feed, Yahoo Finance, Google News, and The GDELT Project for geopolitical tension.</p>
+  <p>Personal tool, not financial advice. Data: Forex Factory calendar feed, Yahoo Finance, Google News, The GDELT Project for geopolitical tension, and FRED (Federal Reserve Bank of St. Louis) for released numbers. This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.</p>
 </footer>
 </div>
 <script>window.BRIEF={json.dumps(cfg)};</script>

@@ -20,9 +20,12 @@ class Settings:
 
     gold: str = "GC=F"
     us30: str = "YM=F"
+    us100: str = "NQ=F"
     dollar: str = "DX-Y.NYB"
     treasury_10y: str = "ZN=F"
     vix: str = "^VIX"
+
+    fred_key: str = ""
 
     telegram_enabled: bool = False
     telegram_token: str = ""
@@ -61,10 +64,13 @@ def load_settings() -> Settings:
         s.timezone = "Asia/Manila"
     s.open_browser = _yes(app.get("open_browser", "yes"))
 
-    for key in ("gold", "us30", "dollar", "treasury_10y", "vix"):
+    for key in ("gold", "us30", "us100", "dollar", "treasury_10y", "vix"):
         val = (sym.get(key) or "").strip()
         if val:
             setattr(s, key, val)
+
+    if cp.has_section("fred"):
+        s.fred_key = (cp["fred"].get("api_key") or "").strip()
 
     s.telegram_enabled = _yes(tg.get("enabled", "no"))
     s.telegram_token = (tg.get("bot_token") or "").strip()

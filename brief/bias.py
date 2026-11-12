@@ -12,8 +12,8 @@ Six drivers feed each instrument, each turned into signed points:
 5. Geopolitical tension: conflict news vs its 30-day normal (GDELT, see geo.py).
 6. The instrument's own price trend (24h, 4h, and against its 5-day average).
 
-Hawkish / USD-up pressure is bearish for gold and for US30.
-Risk-off is bullish for gold (safe haven) and bearish for US30, except when
+Hawkish / USD-up pressure is bearish for gold, US30 and US100.
+Risk-off is bullish for gold (safe haven) and bearish for the indices, except when
 gold is falling along with stocks: then it's selling everything, and fear
 isn't counted for gold.
 Score runs from -10 (strongly bearish) to +10 (strongly bullish).
@@ -47,7 +47,7 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
     end = t + timedelta(minutes=rel["window_min"])
     out = dict(rel)
     out.update({"status": "upcoming", "hawk": None, "verdict": "", "zn_pct": None,
-                "dxy_pct": None, "gold_pct": None, "us30_pct": None})
+                "dxy_pct": None, "gold_pct": None, "us30_pct": None, "us100_pct": None})
 
     if rel.get("all_day"):
         out["status"] = "all_day"
@@ -61,11 +61,11 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
 
     out["status"] = "done"
     moves = {}
-    for key in ("treasury_10y", "dollar", "gold", "us30"):
+    for key in ("treasury_10y", "dollar", "gold", "us30", "us100"):
         s = series.get(key)
         moves[key] = pct(price_at(s, t), price_at(s, end)) if s is not None else None
     out["zn_pct"], out["dxy_pct"] = moves["treasury_10y"], moves["dollar"]
-    out["gold_pct"], out["us30_pct"] = moves["gold"], moves["us30"]
+    out["gold_pct"], out["us30_pct"], out["us100_pct"] = moves["gold"], moves["us30"], moves["us100"]
 
     parts = []
     if out["zn_pct"] is not None:
@@ -160,6 +160,7 @@ def risk_score(snaps: dict) -> tuple[float | None, str]:
 TREND_SCALE = {
     "gold": {"chg_24h": 1.5, "chg_4h": 0.6, "vs_5d": 2.0},
     "us30": {"chg_24h": 1.0, "chg_4h": 0.4, "vs_5d": 1.5},
+    "us100": {"chg_24h": 1.3, "chg_4h": 0.5, "vs_5d": 2.0},
 }
 
 
@@ -259,6 +260,7 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
     d, t, r = d_score or 0.0, t_score or 0.0, r_score or 0.0
     g_trend, g_trend_detail = price_trend("gold", snaps)
     u_trend, u_trend_detail = price_trend("us30", snaps)
+    n_trend, n_trend_detail = price_trend("us100", snaps)
     g_risk, g_risk_detail = gold_risk(r, r_detail, snaps)
     geo_s, geo_detail = geo
     gs = geo_s or 0.0
@@ -277,7 +279,16 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
         {"name": "Headlines", "points": -h["rates"] * 0.8 - h["risk"] * 1.2, "detail": h_detail},
         {"name": "Geopolitics", "points": -gs * 1.0, "detail": geo_detail},
     ], {"name": "Price trend", "points": (u_trend or 0.0) * 2.0, "detail": u_trend_detail})
-    return {"gold": gold, "us30": us30,
+    # US100 is the most rate-sensitive of the three: growth stocks are worth
+    # less when yields rise, so data and yields count a little more than for US30.
+    us100 = _instrument("US100", [
+        {"name": "US data this week", "points": -d * 1.8, "detail": d_detail},
+        {"name": "Dollar and yields", "points": -t * 1.8, "detail": t_detail},
+        {"name": "Risk mood", "points": -r * 2.5, "detail": r_detail},
+        {"name": "Headlines", "points": -h["rates"] * 1.0 - h["risk"] * 1.2, "detail": h_detail},
+        {"name": "Geopolitics", "points": -gs * 1.0, "detail": geo_detail},
+    ], {"name": "Price trend", "points": (n_trend or 0.0) * 2.0, "detail": n_trend_detail})
+    return {"gold": gold, "us30": us30, "us100": us100,
             "components": {"data": d_score, "trend": t_score, "risk": r_score,
                            "headline_rates": h["rates"], "headline_risk": h["risk"]}}
 
@@ -285,7 +296,7 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
 # ---------------------------------------------------------------- timing
 
 def market_status(now: datetime, local_tz) -> dict:
-    """Gold and Dow futures trade Sun 6pm to Fri 5pm New York time, with a
+    """Gold, Dow and Nasdaq futures trade Sun 6pm to Fri 5pm New York time, with a
     one-hour break each day at 5pm New York."""
     ny = now.astimezone(NEW_YORK)
     wd = ny.weekday()  # Monday = 0

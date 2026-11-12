@@ -1,4 +1,4 @@
-"""Market Brief: gold and US30 bias dashboard.
+"""Market Brief: gold, US30 and US100 bias dashboard.
 
 Start it with "Start Market Brief.bat" (Windows) or start_mac.command (Mac).
 Leave the window open while you trade. Close it or press Ctrl+C to stop.
@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from brief import bias as B
 from brief import calendar_feed as C
 from brief import dashboard as D
+from brief import fred as F
 from brief import geo as G
 from brief import leadup as L
 from brief import news as N
@@ -65,7 +66,7 @@ MAX_JOB_MIN = 90
 
 def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple[dict, str]:
     tz = settings.tz
-    symbols = {"gold": settings.gold, "us30": settings.us30, "dollar": settings.dollar,
+    symbols = {"gold": settings.gold, "us30": settings.us30, "us100": settings.us100, "dollar": settings.dollar,
                "treasury_10y": settings.treasury_10y, "vix": settings.vix}
     problems: list[str] = []
     clock_offset_ms = 0
@@ -110,8 +111,21 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
                     print(f"  ! {p}")
 
     releases = [B.score_release(r, series, now) for r in C.group_releases(C.usd_events(rows))]
+    # Real numbers from FRED, where it has them (needs the free key).
+    fred_key = "" if demo else F.api_key(settings)
+    extras = []
+    if demo:
+        F.attach(releases, now, "", persist=False, fixed=DM.ACTUALS)
+        extras.append(dict(DM.GASOLINE, time=now - timedelta(days=2)))
+    else:
+        fred_problem = F.attach(releases, now, fred_key)
+        if fred_problem:
+            problems.append(fred_problem)
+        gas = F.gasoline_lead(now, fred_key)
+        if gas:
+            extras.append(gas)
     log = L.update_log(releases, now, persist=not demo)
-    leadups = L.build(releases, log, now)
+    leadups = L.build(releases, log, now, extras)
     upcoming_high = [r for r in releases if r["status"] == "upcoming" and r["impact"] == "High"]
     market = B.market_status(now, tz)
     if demo:
@@ -152,9 +166,9 @@ def _hm(dt: datetime, tz) -> str:
 
 
 def print_summary(brief: dict, tz) -> None:
-    g, u = brief["bias"]["gold"], brief["bias"]["us30"]
+    g, u, n = brief["bias"]["gold"], brief["bias"]["us30"], brief["bias"]["us100"]
     print(f"[{_hm(brief['now'], tz)}] Gold: {g['label']} ({g['score']:+.1f})   "
-          f"US30: {u['label']} ({u['score']:+.1f})")
+          f"US30: {u['label']} ({u['score']:+.1f})   US100: {n['label']} ({n['score']:+.1f})")
     nxt = brief["next_release"]
     if nxt:
         print(f"           Next big release: {nxt['headline']} at "
@@ -218,7 +232,7 @@ def run_hosted(settings) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Gold and US30 market brief")
+    ap = argparse.ArgumentParser(description="Gold, US30 and US100 market brief")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--no-browser", action="store_true")

@@ -1,12 +1,14 @@
 # Market Brief
 
-A gold and US30 bias dashboard that updates itself every 30 minutes.
+A gold, US30 and US100 bias dashboard that updates itself every 30 minutes.
 
 Each update it:
 - pulls this week's US economic calendar (CPI, NFP, FOMC, PCE...)
-- checks gold, US30, the dollar index, 10Y T-notes and VIX
+- checks gold, US30, US100, the dollar index, 10Y T-notes and VIX
+- reads the actual release numbers from FRED (optional free key, part H)
 - reads the last 12 hours of headlines
-- scores gold and US30 from −10 (bearish) to +10 (bullish), and lists the reasons underneath
+- scores gold, US30 and US100 from −10 (bearish) to +10 (bullish), and lists the reasons underneath
+- before NFP, CPI and Core PCE, reads the data that came out ahead of them and shows which way each market usually goes if the big number follows
 
 It runs for free on GitHub, so your computer doesn't need to be on.
 
@@ -79,11 +81,11 @@ The big word (Bearish, Leaning bullish, No clear lean...) is the bias. Below it 
 
 | Driver | What it measures |
 |---|---|
-| US data this week | How yields and the dollar reacted in the first 15 minutes after each big US release. Yields and dollar up means hawkish, which is bad for gold and US30. Older releases count less (half weight after 3 days). |
+| US data this week | How yields and the dollar reacted in the first 15 minutes after each big US release. Yields and dollar up means hawkish, which is bad for gold, US30 and US100. Older releases count less (half weight after 3 days). |
 | Dollar and yields | The dollar and 10Y yields over the last 24 hours. |
-| Risk mood | VIX. Nervous markets hurt US30 and usually help gold. The exception is when gold falls along with stocks: that's traders selling everything, so fear isn't counted for gold. |
+| Risk mood | VIX. Nervous markets hurt US30 and US100 and usually help gold. The exception is when gold falls along with stocks: that's traders selling everything, so fear isn't counted for gold. |
 | Headlines | Keyword tags on recent news (rates talk and market risk mood). |
-| Geopolitics | Of the news about events between two countries in the last 24 hours, how much is about conflict (threats, military moves, coercion, attacks, fighting), compared with the normal level over the past 30 days. It comes from the live event feed of [The GDELT Project](https://www.gdeltproject.org/), a free, open database that codes world news every 15 minutes. More conflict news than usual supports gold as a safe haven and weighs on US30. If it turns **high**, Telegram sends you a message. |
+| Geopolitics | Of the news about events between two countries in the last 24 hours, how much is about conflict (threats, military moves, coercion, attacks, fighting), compared with the normal level over the past 30 days. It comes from the live event feed of [The GDELT Project](https://www.gdeltproject.org/), a free, open database that codes world news every 15 minutes. More conflict news than usual supports gold as a safe haven and weighs on US30 and US100. If it turns **high**, Telegram sends you a message. |
 | Price trend | The market's own direction: the last 24 hours, the last 4 hours, and where price sits against its 5-day average. |
 
 When the data and news point one way but price keeps going the other, the card shows a **Price disagrees** note. That's a sign to wait for price to confirm.
@@ -98,14 +100,19 @@ When the data and news point one way but price keeps going the other, the card s
 | CPI | PPI, ISM prices paid, import prices, wage growth from the last NFP, inflation expectations |
 | Core PCE | CPI, PPI, import prices |
 
-Each lead-in is read from how yields and the dollar reacted to it, because the free calendar doesn't include the actual numbers. Some lead-ins predict better than others. ADP is a weak guide to NFP, while CPI and PPI tell you most of what PCE will show. So each read comes with a confidence level. Scored releases are kept for 45 days, so lead-ins from earlier weeks still count. The Telegram heads-up before each big release includes the lead-up read.
+With the FRED key set (part H), each lead-in is read from its actual number against the forecast, for example "ADP 58K vs 42K forecast", and gasoline prices are added as a lead-in for CPI. Lead-ins FRED doesn't carry (the ISM surveys, Challenger, consumer confidence), and everything when no key is set, are read from how yields and the dollar reacted instead.
+
+Under the lead-ins, each card shows the usual first reaction of gold, US30 and US100 to a hot and to a cold number, and marks the side the lead-up leans toward. That is the pre-release outlook. It does not change the bias score until the number is out.
+
+Some lead-ins predict better than others. ADP is a weak guide to NFP, while CPI and PPI tell you most of what PCE will show. So each read comes with a confidence level. Scored releases are kept for 45 days, so lead-ins from earlier weeks still count. The Telegram heads-up before each big release includes the lead-up read.
 
 The purple bar at the top warns you before high-impact releases (with a countdown) and right after them. The first 15 to 30 minutes after a release are often noisy and can reverse.
 
 Things to know:
 - Prices come from Yahoo and lag about 10 minutes. The dashboard is for bias and timing, not entries. Use your broker chart for those.
 - Gold is shown as GC futures, which trade a few dollars above spot XAUUSD. The direction is what matters here.
-- The free calendar has the forecast but not the actual number, so the app reads the surprise from how the market reacted.
+- The free calendar has the forecast but not the actual number. The bias score reads the surprise from how the market reacted. The actual numbers shown come from FRED, usually within an hour of the release.
+- US100 is NQ futures (Nasdaq 100).
 - This is a personal tool, not financial advice.
 
 ---
@@ -119,7 +126,7 @@ Things to know:
 2. In TradingView, open a gold or US30 chart, then open **Pine Editor** at the bottom.
 3. Select everything in the editor, paste over it, click **Save**, then **Add to chart**.
 
-It works on XAUUSD, GOLD, GC, US30 and Dow charts, on any timeframe. Settings let you move the table or force Gold/US30 if your broker's symbol name isn't recognised.
+It works on XAUUSD, GOLD, GC, US30 and Dow charts, on any timeframe. US100 isn't in the indicator yet. Settings let you move the table or force Gold/US30 if your broker's symbol name isn't recognised.
 
 **Alert when the bias changes:** click **Alert**, set Condition to **Market Brief (live drivers)** and **Any alert() function call**, then pick how you want to be notified (TradingView app, email, or webhook).
 
@@ -156,7 +163,22 @@ This is a practical summary, not legal advice.
 | `settings.ini` | time zone, symbols, local refresh time |
 | `.github/workflows/market-brief.yml` | the online schedule |
 | `brief/bias.py` | the bias rules and point weights |
+| `brief/leadup.py` | which releases lead into NFP, CPI and PCE, and the usual market reaction |
+| `brief/fred.py` | which releases get their actual number from FRED |
 | `brief/news.py` | headline searches and keyword lists |
 | `brief/dashboard.py` | how the page looks |
 
 To preview layout changes on your PC with made-up data, run `python main.py --demo`.
+
+---
+
+## H. Real release numbers (free FRED key)
+
+FRED is the free data service of the Federal Reserve Bank of St. Louis. With a key, the app shows the actual number for CPI, PCE, PPI, NFP, ADP, jobless claims, JOLTS, retail sales and GDP, and uses those numbers in the lead-up reads. Without a key the app still works and reads everything from the market's reaction.
+
+1. Make a free account at https://fredaccount.stlouisfed.org/apikeys and request an API key.
+2. In this repo, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `FRED_API_KEY`, paste the key, and click **Add secret**.
+
+The next update picks it up. If you run the app on your PC instead, put the key under `[fred]` in `settings.ini`. **Never put the key in a file in this repo.**
+
+FRED usually has a number within an hour of the release, so right after a release the actual may still be blank.

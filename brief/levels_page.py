@@ -240,7 +240,7 @@ def _day_card(key: str, row: dict, last: float | None, tz, now: datetime, is_pdh
          "High", row.get("asia_h"), row.get("asia_h_t", ""), "Low", row.get("asia_l"), row.get("asia_l_t", "")),
         ("sbox london", "London Session", _session_bounds(day_str, "Europe/London", 8, 0, 16, 30),
          "High", row.get("london_h"), row.get("london_h_t", ""), "Low", row.get("london_l"), row.get("london_l_t", "")),
-        ("sbox ny", "New York Session", _session_bounds(day_str, "America/New_York", 8, 0, 17, 0),
+        ("sbox ny", "New York Session", _session_bounds(day_str, "America/New_York", 9, 30, 17, 0),
          "High", row.get("ny_h"), row.get("ny_h_t", ""), "Low", row.get("ny_l"), row.get("ny_l_t", "")),
         ("sbox", "Full Day", _session_bounds(day_str, "America/New_York", 18, 0, 17, 0, prev_day_open=True),
          full_hi_lbl, hi, row.get("high_t", ""), full_lo_lbl, lo, row.get("low_t", "")),
@@ -342,7 +342,7 @@ def render(brief: dict) -> str:
     today_str = now.astimezone(tz).strftime("%Y-%m-%d")
     asia_sub = _fmt_window(_session_bounds(today_str, "Asia/Tokyo", 9, 0, 15, 0), tz)
     lon_sub = _fmt_window(_session_bounds(today_str, "Europe/London", 8, 0, 16, 30), tz)
-    ny_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 8, 0, 17, 0), tz)
+    ny_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 9, 30, 17, 0), tz)
     full_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 18, 0, 17, 0, prev_day_open=True), tz)
 
     return f"""<!doctype html>

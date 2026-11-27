@@ -87,10 +87,10 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
         < first_card.index("Full Day")
     )
     assert "18:00–03:00 ET" not in html
-    # In Asia/Manila (November EST = 13h behind NY): Asia 8am-2pm, London 4pm-12:30am, NY 9pm-6am
+    # In Asia/Manila (November EST = 13h behind NY): Asia 8am-2pm, London 4pm-12:30am, NY 10:30pm-6am
     assert "8:00 AM–2:00 PM" in html
     assert "4:00 PM–12:30 AM" in html
-    assert "9:00 PM–6:00 AM" in html
+    assert "10:30 PM–6:00 AM" in html
     assert "7:00 AM–6:00 AM" in html
     assert 'class="rangebar"' in html
 
@@ -165,6 +165,19 @@ def test_levels_page_session_status_badges_in_manila_time():
     assert "Upcoming" in _box_chunk(gold_morning, "London Session", "New York Session")
     assert "Upcoming" in _box_chunk(gold_morning, "New York Session", "Full Day")
     assert "Forming" in _box_chunk(gold_morning, "Full Day", None)
+
+    brief["now"] = datetime(2026, 11, 27, 22, 0, tzinfo=ph)
+    html_pre_ny = LVL.render(brief)
+    gold_pre_ny = html_pre_ny[html_pre_ny.index('id="lvl-gold"'):html_pre_ny.index('id="lvl-us30"')]
+    assert "Upcoming" in _box_chunk(gold_pre_ny, "New York Session", "Full Day")
+
+    brief["now"] = datetime(2026, 11, 27, 22, 35, tzinfo=ph)
+    html_ny_open = LVL.render(brief)
+    gold_ny_open = html_ny_open[html_ny_open.index('id="lvl-gold"'):html_ny_open.index('id="lvl-us30"')]
+    assert "Forming" in _box_chunk(gold_ny_open, "New York Session", "Full Day")
+
+    assert LVL._fmt_window(LVL._session_bounds("2026-07-15", "America/New_York", 9, 30, 17, 0), ph) == "9:30 PM–5:00 AM"
+    assert LVL._fmt_window(LVL._session_bounds("2026-11-27", "America/New_York", 9, 30, 17, 0), ph) == "10:30 PM–6:00 AM"
 
 
 def test_publish_pushes_levels_and_history_to_gh_pages(tmp_path, monkeypatch):

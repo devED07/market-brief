@@ -97,7 +97,7 @@ def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str,
 
     asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[(tok_m >= 9 * 60) & (tok_m < 15 * 60)])
     lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[(lon_m >= 8 * 60) & (lon_m < 16 * 60 + 30)])
-    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(ny_m >= 8 * 60) & (ny_m < 17 * 60)])
+    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(ny_m >= 9 * 60 + 30) & (ny_m < 17 * 60)])
     return {
         "asia_h": asia_h,
         "asia_h_t": asia_h_t,

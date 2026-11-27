@@ -1,5 +1,6 @@
-"""Turns live session key levels and 5-day PDH/PDL into a separate page (levels.html)."""
+"""Turns live session key levels and day-by-day PDH/PDL into a separate page (levels.html)."""
 
+from datetime import datetime
 from html import escape
 
 from .dashboard import CSS as BASE_CSS, _num, _t
@@ -20,37 +21,77 @@ EXTRA_CSS = """
 .lvl-pane{display:none}
 .lvl-pane.active{display:block}
 
-.lvl-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px}
-.lvl-panel h3{font-size:15px;font-weight:700;margin:0 0 8px}
-table.kv{width:100%;border-collapse:collapse;font-size:13.5px}
-table.kv td{padding:7px 0;border-top:1px solid var(--line);vertical-align:baseline}
-table.kv td:nth-child(2){text-align:right;font-weight:600;padding-right:12px;white-space:nowrap}
-table.kv td:last-child{text-align:right;font-size:12.5px;white-space:nowrap;width:110px}
+.ref-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px;margin-bottom:18px}
+.ref-item{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.ref-k{display:block;color:var(--faint);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.ref-v{display:block;font-size:16px;font-weight:700;margin:2px 0 1px}
+.ref-d{display:block;font-size:12px}
 .stretched{color:var(--gold);font-weight:600}
 
-.tbl-wrap{overflow-x:auto}
-table.hist{width:100%;border-collapse:collapse;font-size:13.5px;min-width:700px}
-table.hist th{color:var(--faint);font-weight:500;text-align:right;padding:0 8px 8px;font-size:12px;white-space:nowrap}
-table.hist th:first-child,table.hist th.left{text-align:left;padding-left:0}
-table.hist td{padding:9px 8px;border-top:1px solid var(--line);text-align:right;vertical-align:top;white-space:nowrap}
-table.hist td:first-child,table.hist td.left{text-align:left;padding-left:0}
+.day-cards{display:flex;flex-direction:column;gap:14px}
+.day-card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+.day-card.today{border-left:3px solid var(--event)}
+.day-card.pdh-card{border-left:3px solid var(--gold)}
+.day-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;
+  padding-bottom:10px;border-bottom:1px solid var(--line)}
+.day-title{font-weight:700;font-size:16px}
+.day-meta{color:var(--muted);font-size:13px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline}
 .badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;
   margin-left:6px;border:1px solid var(--line);color:var(--muted);vertical-align:1px}
+.badge.live{color:var(--event);border-color:color-mix(in srgb,var(--event) 55%,transparent);
+  background:color-mix(in srgb,var(--event) 12%,var(--panel))}
 .badge.pdh{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 55%,transparent);
   background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
 
-@media (max-width:860px){.lvl-grid{grid-template-columns:1fr}}
+.sess-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+.sbox{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:10px 12px}
+.sbox-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.sbox-name{font-weight:700;font-size:13px}
+.sbox-time{color:var(--faint);font-size:11.5px}
+.sbox.asia .sbox-name{color:var(--gold)}
+.sbox.london .sbox-name{color:var(--us30)}
+.sbox.ny .sbox-name{color:var(--event)}
+.lvl-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:4px 0;font-size:13px}
+.lvl-row + .lvl-row{border-top:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.lvl-lbl{color:var(--muted)}
+.lvl-val{font-weight:700}
+.lvl-sub{display:block;font-size:11.5px;color:var(--faint);text-align:right;font-weight:400}
+
+.rangebar-wrap{margin-top:12px;display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--faint)}
+.rangebar{position:relative;flex:1;height:10px;background:var(--bg);border-radius:5px;border:1px solid var(--line)}
+.rseg{position:absolute;top:1px;bottom:1px;border-radius:3px;opacity:.75}
+.rseg.asia{background:var(--gold)}
+.rseg.london{background:var(--us30)}
+.rseg.ny{background:var(--event)}
+.rpin{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;background:var(--text);transform:translateX(-1px)}
+
+@media (max-width:1020px){.sess-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:560px){.sess-grid{grid-template-columns:1fr}}
 """
 
 JS = """
 (function(){
-  document.querySelectorAll("[data-tab]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      var key = btn.getAttribute("data-tab");
-      document.querySelectorAll("[data-tab]").forEach(function(b){ b.classList.toggle("active", b === btn); });
-      document.querySelectorAll(".lvl-pane").forEach(function(p){ p.classList.toggle("active", p.id === "lvl-" + key); });
+  function activate(key, updateHash){
+    if (!document.getElementById("lvl-" + key)) key = "gold";
+    document.querySelectorAll("[data-tab]").forEach(function(b){
+      b.classList.toggle("active", b.getAttribute("data-tab") === key);
     });
+    document.querySelectorAll(".lvl-pane").forEach(function(p){
+      p.classList.toggle("active", p.id === "lvl-" + key);
+    });
+    if (updateHash && history.replaceState){
+      history.replaceState(null, "", "#" + key);
+    }
+  }
+  document.querySelectorAll("[data-tab]").forEach(function(btn){
+    btn.addEventListener("click", function(){ activate(btn.getAttribute("data-tab"), true); });
   });
+  function fromHash(){
+    var h = (location.hash || "").replace("#", "").toLowerCase();
+    if (h) activate(h, false);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
 })();
 """
 
@@ -66,108 +107,168 @@ def _dist(level: float | None, last: float | None) -> str:
     return f'<span class="down">{abs(pct_diff):.2f}% below</span>'
 
 
-def _kv_row(key: str, label: str, val: float | None, last: float | None) -> str:
-    val_txt = _num(key, val) if val is not None else '<span class="na">—</span>'
-    return f'<tr><td>{escape(label)}</td><td>{val_txt}</td><td>{_dist(val, last)}</td></tr>'
+def _fmt_iso(iso: str, tz) -> str:
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+        return _t(dt, tz)
+    except Exception:
+        return ""
 
 
-def _kv_pair(key: str, label: str, hi: float | None, lo: float | None) -> str:
-    if hi is None or lo is None:
-        return f'<tr><td>{escape(label)}</td><td class="na">—</td><td class="na"></td></tr>'
-    return f'<tr><td>{escape(label)}</td><td>{_num(key, hi)} / {_num(key, lo)}</td><td class="na">H / L</td></tr>'
+def _level_line(key: str, label: str, val: float | None, time_iso: str, last: float | None, tz) -> str:
+    if val is None:
+        return (
+            f'<div class="lvl-row"><span class="lvl-lbl">{escape(label)}</span>'
+            f'<span class="na">—</span></div>'
+        )
+    when = _fmt_iso(time_iso, tz)
+    sub_bits = [b for b in (when, _dist(val, last)) if b]
+    sub = f'<span class="lvl-sub">{" · ".join(sub_bits)}</span>' if sub_bits else ""
+    return (
+        f'<div class="lvl-row">'
+        f'<span class="lvl-lbl">{escape(label)}</span>'
+        f'<span><span class="lvl-val">{_num(key, val)}</span>{sub}</span>'
+        f'</div>'
+    )
 
 
-def _hl_pair(key: str, hi: float | None, lo: float | None) -> str:
-    if hi is None or lo is None:
-        return '<span class="na">—</span>'
-    return f"{_num(key, hi)} / {_num(key, lo)}"
+def _range_bar(key: str, row: dict, last: float | None) -> str:
+    hi, lo = row.get("high"), row.get("low")
+    if hi is None or lo is None or hi <= lo:
+        return ""
+    span = hi - lo
+
+    def seg(cls: str, title: str, sh: float | None, sl: float | None) -> str:
+        if sh is None or sl is None or sh < sl:
+            return ""
+        left = max(0.0, min(100.0, (sl - lo) / span * 100.0))
+        width = max(2.0, min(100.0 - left, (sh - sl) / span * 100.0))
+        return f'<span class="rseg {cls}" style="left:{left:.1f}%;width:{width:.1f}%" title="{escape(title)}"></span>'
+
+    segs = "".join([
+        seg("asia", "Asia range", row.get("asia_h"), row.get("asia_l")),
+        seg("london", "London range", row.get("london_h"), row.get("london_l")),
+        seg("ny", "New York range", row.get("ny_h"), row.get("ny_l")),
+    ])
+    pin = ""
+    if last is not None and lo <= last <= hi:
+        pos = (last - lo) / span * 100.0
+        pin = f'<span class="rpin" style="left:{pos:.1f}%" title="Last {_num(key, last)}"></span>'
+    return (
+        f'<div class="rangebar-wrap">'
+        f'<span>{_num(key, lo)}</span>'
+        f'<div class="rangebar">{segs}{pin}</div>'
+        f'<span>{_num(key, hi)}</span>'
+        f'</div>'
+    )
 
 
-def _asset_pane(key: str, snap: dict) -> str:
+def _day_card(key: str, row: dict, last: float | None, tz, is_pdh: bool = False) -> str:
+    is_today = bool(row.get("is_today"))
+    card_cls = "day-card today" if is_today else ("day-card pdh-card" if is_pdh else "day-card")
+    badge = (
+        '<span class="badge live">Today (Live)</span>' if is_today
+        else '<span class="badge pdh">PDH / PDL</span>' if is_pdh else ""
+    )
+
+    chg = row.get("chg_pct")
+    chg_cls = "up" if (chg or 0) > 0.005 else "down" if (chg or 0) < -0.005 else "na"
+    chg_txt = f'<span class="{chg_cls}">{chg:+.2f}%</span>' if chg is not None else "—"
+    rng_txt = f'{row["range_pct"]:.2f}%' if row.get("range_pct") is not None else "—"
+
+    hi, lo = row.get("high"), row.get("low")
+    if last is None or hi is None or lo is None:
+        vs_now = ""
+    elif last > hi:
+        vs_now = '<span class="up">Above high</span>'
+    elif last < lo:
+        vs_now = '<span class="down">Below low</span>'
+    else:
+        vs_now = '<span class="na">Inside range</span>'
+
+    full_hi_lbl = "PDH" if is_pdh else "Day High"
+    full_lo_lbl = "PDL" if is_pdh else "Day Low"
+    close_lbl = "Last" if is_today else "Close"
+
+    boxes = "".join([
+        f'<div class="sbox">'
+        f'<div class="sbox-head"><span class="sbox-name">Full Day</span><span class="sbox-time">18:00–17:00 ET</span></div>'
+        f'{_level_line(key, full_hi_lbl, hi, row.get("high_t", ""), last, tz)}'
+        f'{_level_line(key, full_lo_lbl, lo, row.get("low_t", ""), last, tz)}'
+        f'</div>',
+        f'<div class="sbox asia">'
+        f'<div class="sbox-head"><span class="sbox-name">Asia Session</span><span class="sbox-time">18:00–03:00 ET</span></div>'
+        f'{_level_line(key, "High", row.get("asia_h"), row.get("asia_h_t", ""), last, tz)}'
+        f'{_level_line(key, "Low", row.get("asia_l"), row.get("asia_l_t", ""), last, tz)}'
+        f'</div>',
+        f'<div class="sbox london">'
+        f'<div class="sbox-head"><span class="sbox-name">London Session</span><span class="sbox-time">03:00–08:00 ET</span></div>'
+        f'{_level_line(key, "High", row.get("london_h"), row.get("london_h_t", ""), last, tz)}'
+        f'{_level_line(key, "Low", row.get("london_l"), row.get("london_l_t", ""), last, tz)}'
+        f'</div>',
+        f'<div class="sbox ny">'
+        f'<div class="sbox-head"><span class="sbox-name">New York Session</span><span class="sbox-time">08:00–17:00 ET</span></div>'
+        f'{_level_line(key, "High", row.get("ny_h"), row.get("ny_h_t", ""), last, tz)}'
+        f'{_level_line(key, "Low", row.get("ny_l"), row.get("ny_l_t", ""), last, tz)}'
+        f'</div>',
+    ])
+
+    title = row.get("full_label") or row.get("label") or row.get("date", "")
+    return f"""
+<article class="{card_cls}">
+  <div class="day-head">
+    <div class="day-title">{escape(title)}{badge}</div>
+    <div class="day-meta">
+      <span>Open <b>{_num(key, row.get("open"))}</b></span>
+      <span>{close_lbl} <b>{_num(key, row.get("close"))}</b> ({chg_txt})</span>
+      <span>Range <b>{rng_txt}</b></span>
+      {vs_now}
+    </div>
+  </div>
+  <div class="sess-grid">{boxes}</div>
+  {_range_bar(key, row, last)}
+</article>"""
+
+
+def _ref_card(label: str, val_txt: str, sub_html: str) -> str:
+    return (
+        f'<div class="ref-item">'
+        f'<span class="ref-k">{escape(label)}</span>'
+        f'<span class="ref-v">{val_txt}</span>'
+        f'<span class="ref-d">{sub_html}</span>'
+        f'</div>'
+    )
+
+
+def _asset_pane(key: str, snap: dict, tz) -> str:
     last = snap.get("last")
     sl = snap.get("session_levels") or {}
     ru = snap.get("range_used")
-    if ru is not None:
-        stretched = ' <span class="stretched">(stretched)</span>' if ru >= 1.5 else ""
-        range_row = f'<tr><td>Daily range used</td><td>{ru:.2f}× 5d avg</td><td>{stretched or "normal"}</td></tr>'
-    else:
-        range_row = '<tr><td>Daily range used</td><td class="na">—</td><td class="na"></td></tr>'
+    rng_val = f"{ru:.2f}× 5d avg" if ru is not None else "—"
+    rng_sub = '<span class="stretched">Stretched</span>' if (ru is not None and ru >= 1.5) else '<span class="na">vs 5-day avg</span>'
 
-    cur_rows = "".join([
-        _kv_row(key, "Today's Open", sl.get("today_open"), last),
-        _kv_row(key, "Today's High", sl.get("today_high"), last),
-        _kv_row(key, "Today's Low", sl.get("today_low"), last),
-        range_row,
-        _kv_row(key, "Asia High (18–03 ET)", sl.get("asia_h"), last),
-        _kv_row(key, "Asia Low (18–03 ET)", sl.get("asia_l"), last),
-        _kv_row(key, "London High (03–08 ET)", sl.get("london_h"), last),
-        _kv_row(key, "London Low (03–08 ET)", sl.get("london_l"), last),
-        _kv_row(key, "New York High (08–17 ET)", sl.get("ny_h"), last),
-        _kv_row(key, "New York Low (08–17 ET)", sl.get("ny_l"), last),
-    ])
+    strip = f"""<div class="ref-strip">
+  {_ref_card("Last Price", _num(key, last) if last is not None else "n/a", '<span class="na">~10m delayed</span>')}
+  {_ref_card("PDH (Prev High)", _num(key, sl.get("pdh")), _dist(sl.get("pdh"), last))}
+  {_ref_card("PDL (Prev Low)", _num(key, sl.get("pdl")), _dist(sl.get("pdl"), last))}
+  {_ref_card("PDC (Prev Close)", _num(key, sl.get("pdc")), _dist(sl.get("pdc"), last))}
+  {_ref_card("5-Day High", _num(key, sl.get("week_h")), _dist(sl.get("week_h"), last))}
+  {_ref_card("5-Day Low", _num(key, sl.get("week_l")), _dist(sl.get("week_l"), last))}
+  {_ref_card("Today Range", rng_val, rng_sub)}
+</div>"""
 
-    ref_rows = "".join([
-        _kv_row(key, "PDH (Previous Day High)", sl.get("pdh"), last),
-        _kv_row(key, "PDL (Previous Day Low)", sl.get("pdl"), last),
-        _kv_row(key, "PDC (Previous Day Close)", sl.get("pdc"), last),
-        _kv_row(key, "5-Day Swing High", sl.get("week_h"), last),
-        _kv_row(key, "5-Day Swing Low", sl.get("week_l"), last),
-        _kv_pair(key, "Prev Asia (18–03 ET)", sl.get("prev_asia_h"), sl.get("prev_asia_l")),
-        _kv_pair(key, "Prev London (03–08 ET)", sl.get("prev_london_h"), sl.get("prev_london_l")),
-        _kv_pair(key, "Prev New York (08–17 ET)", sl.get("prev_ny_h"), sl.get("prev_ny_l")),
-    ])
+    cards = []
+    today = snap.get("today_levels")
+    if today:
+        cards.append(_day_card(key, today, last, tz, is_pdh=False))
+    for idx, row in enumerate(snap.get("levels_5d") or []):
+        cards.append(_day_card(key, row, last, tz, is_pdh=(idx == 0)))
 
-    levels = snap.get("levels_5d") or []
-    if not levels:
-        tbl_html = '<p class="empty">Not enough intraday bars yet to build 5 completed trading days.</p>'
-    else:
-        rows = []
-        for idx, row in enumerate(levels):
-            badge = '<span class="badge pdh">PDH / PDL</span>' if idx == 0 else ""
-            rng = f'{row["range_pct"]:.2f}%' if row.get("range_pct") is not None else "—"
-            if last is None:
-                vs_now = '<span class="na">—</span>'
-            elif last > row["high"]:
-                vs_now = '<span class="up">Above high</span>'
-            elif last < row["low"]:
-                vs_now = '<span class="down">Below low</span>'
-            else:
-                vs_now = '<span class="na">Inside</span>'
-            rows.append(
-                f'<tr>'
-                f'<td class="left">{escape(row["label"])}{badge}</td>'
-                f'<td>{_num(key, row["high"])}</td>'
-                f'<td>{_num(key, row["low"])}</td>'
-                f'<td>{_num(key, row["close"])}</td>'
-                f'<td>{rng}</td>'
-                f'<td>{_hl_pair(key, row.get("asia_h"), row.get("asia_l"))}</td>'
-                f'<td>{_hl_pair(key, row.get("london_h"), row.get("london_l"))}</td>'
-                f'<td>{_hl_pair(key, row.get("ny_h"), row.get("ny_l"))}</td>'
-                f'<td>{vs_now}</td>'
-                f'</tr>'
-            )
-        tbl_html = f"""<div class="tbl-wrap"><table class="hist">
-<thead><tr>
-  <th class="left">Day</th><th>Daily High</th><th>Daily Low</th><th>Close</th><th>Range</th>
-  <th>Asia (18–03 ET)</th><th>London (03–08 ET)</th><th>New York (08–17 ET)</th><th>vs Now</th>
-</tr></thead>
-<tbody>{''.join(rows)}</tbody>
-</table></div>"""
-
-    return f"""
-<div class="lvl-grid">
-  <div class="panel lvl-panel">
-    <h3>Current session levels</h3>
-    <table class="kv"><tbody>{cur_rows}</tbody></table>
-  </div>
-  <div class="panel lvl-panel">
-    <h3>Reference levels (PDH / PDL &amp; prior sessions)</h3>
-    <table class="kv"><tbody>{ref_rows}</tbody></table>
-  </div>
-</div>
-<h2>Last 5 completed trading days</h2>
-<p class="sub">Aligned to the New York futures day (18:00–17:00 ET), newest first. Row 1 is yesterday's PDH / PDL.</p>
-<div class="panel">{tbl_html}</div>"""
+    if not cards:
+        return strip + '<div class="panel"><p class="empty">Not enough intraday bars yet to build session levels.</p></div>'
+    return strip + f'<div class="day-cards">{"".join(cards)}</div>'
 
 
 def render(brief: dict) -> str:
@@ -190,7 +291,7 @@ def render(brief: dict) -> str:
             f'<button type="button" class="tab {key}{active}" data-tab="{key}">'
             f'{escape(name)}<span>{escape(syms.get(key, ""))} · {last_txt}</span></button>'
         )
-        panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{_asset_pane(key, snap)}</div>')
+        panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{_asset_pane(key, snap, tz)}</div>')
 
     return f"""<!doctype html>
 <html lang="en"><head>
@@ -216,8 +317,8 @@ def render(brief: dict) -> str:
 </header>
 
 <section aria-labelledby="lvl-main-h">
-  <h2 id="lvl-main-h">Session key levels</h2>
-  <p class="sub">Asia (18:00–03:00 ET), London (03:00–08:00 ET), New York (08:00–17:00 ET), PDH / PDL / PDC, and 5-day swing levels from Yahoo Finance 5-minute futures bars (~10 min delayed).</p>
+  <h2 id="lvl-main-h">Day-by-day session key levels</h2>
+  <p class="sub">Each trading day's Full Day (PDH/PDL), Asia (18:00–03:00 ET), London (03:00–08:00 ET), and New York (08:00–17:00 ET) highs and lows, with the local time each level was set. Bar colors: gold = Asia, blue = London, purple = New York, white pin = current price.</p>
   <div class="tabs" role="tablist">{''.join(tabs)}</div>
   {''.join(panes)}
 </section>

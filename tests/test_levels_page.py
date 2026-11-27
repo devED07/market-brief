@@ -44,6 +44,14 @@ def test_session_levels_aligns_asia_evening_to_next_futures_day():
     dl = P.daily_levels(series, days=5)
     assert len(dl) == 1
     assert dl[0]["date"] == "2026-11-23"
+    assert dl[0]["open"] == 4100.0
+    assert dl[0]["high_t"] and dl[0]["low_t"]
+    assert dl[0]["asia_h_t"] and dl[0]["london_h_t"] and dl[0]["ny_h_t"]
+
+    cur = P.current_day_levels(series)
+    assert cur is not None and cur["is_today"] is True
+    assert cur["date"] == "2026-11-24"
+    assert cur["asia_h_t"] and cur["london_h_t"] and cur["ny_h_t"]
 
 
 def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
@@ -52,8 +60,12 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
     monkeypatch.setattr(M, "LEVELS_PAGE_FILE", tmp_path / "levels.html")
 
     settings = load_settings()
-    brief, _ = M.run_cycle(settings, demo=True, memory={})
+    brief, dash_html = M.run_cycle(settings, demo=True, memory={})
     html = brief["levels_html"]
+
+    assert 'href="levels.html#gold"' in dash_html
+    assert 'href="levels.html#us30"' in dash_html
+    assert 'href="levels.html#us100"' in dash_html
 
     assert 'href="dashboard.html"' in html
     assert 'href="levels.html"' in html
@@ -61,10 +73,13 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
     assert 'id="lvl-gold"' in html
     assert 'id="lvl-us30"' in html
     assert 'id="lvl-us100"' in html
-    assert "Current session levels" in html
-    assert "PDH (Previous Day High)" in html
+    assert "Today (Live)" in html
     assert "PDH / PDL" in html
-    assert "Asia High (18–03 ET)" in html
+    assert "Full Day" in html
+    assert "Asia Session" in html
+    assert "London Session" in html
+    assert "New York Session" in html
+    assert 'class="rangebar"' in html
 
     brief["hosted"] = True
     hosted_html = LVL.render(brief)

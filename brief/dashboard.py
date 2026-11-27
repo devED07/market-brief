@@ -74,6 +74,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
 .spark{width:130px;height:26px;flex:0 0 auto;overflow:visible}
 .levels{color:var(--faint);font-size:12px;margin:4px 0 2px}
 .levels .stretched{color:var(--gold);font-weight:600}
+.lvl-link{color:var(--event);text-decoration:none;font-weight:600;margin-left:6px}
+.lvl-link:hover{text-decoration:underline}
 .rel-out .disc{display:block;color:var(--gold);font-size:12px}
 .agree{color:var(--muted);font-size:13px;margin:8px 0 12px}
 .warn{margin:0 0 12px;padding:9px 12px;border-radius:5px;font-size:13px;line-height:1.45;
@@ -376,7 +378,8 @@ def _levels_html(key: str, snap: dict | None) -> str:
     if ru is not None:
         stretched = ' <span class="stretched">(stretched)</span>' if ru >= 1.5 else ""
         bits.append(f'Range {ru:.1f}× avg{stretched}')
-    return f'<div class="levels">{" · ".join(bits)}</div>'
+    link = f'<a class="lvl-link" href="levels.html#{key}">All levels →</a>'
+    return f'<div class="levels">{" · ".join(bits)} {link}</div>'
 
 
 def _instrument(key: str, name: str, symbol: str, data: dict,

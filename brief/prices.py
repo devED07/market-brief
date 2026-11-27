@@ -73,25 +73,59 @@ def pct(a: float | None, b: float | None) -> float | None:
     return (b - a) / a * 100.0
 
 
-def _hl(sub: pd.Series) -> tuple[float | None, float | None]:
+def _hl_with_time(sub: pd.Series) -> tuple[float | None, str, float | None, str]:
     if sub.empty:
-        return None, None
-    return float(sub.max()), float(sub.min())
+        return None, "", None, ""
+    return (
+        float(sub.max()),
+        sub.idxmax().to_pydatetime().isoformat(),
+        float(sub.min()),
+        sub.idxmin().to_pydatetime().isoformat(),
+    )
 
 
-def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str, float | None]:
+def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str, float | str | None]:
     hours = day_ny.hour
-    asia_h, asia_l = _hl(day_s[(hours >= 18) | (hours < 3)])
-    lon_h, lon_l = _hl(day_s[(hours >= 3) & (hours < 8)])
-    ny_h, ny_l = _hl(day_s[(hours >= 8) & (hours < 17)])
+    asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[(hours >= 18) | (hours < 3)])
+    lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[(hours >= 3) & (hours < 8)])
+    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(hours >= 8) & (hours < 17)])
     return {
         "asia_h": asia_h,
+        "asia_h_t": asia_h_t,
         "asia_l": asia_l,
+        "asia_l_t": asia_l_t,
         "london_h": lon_h,
+        "london_h_t": lon_h_t,
         "london_l": lon_l,
+        "london_l_t": lon_l_t,
         "ny_h": ny_h,
+        "ny_h_t": ny_h_t,
         "ny_l": ny_l,
+        "ny_l_t": ny_l_t,
     }
+
+
+def _build_day_dict(day_s: pd.Series, day_ny: pd.DatetimeIndex, d: pd.Timestamp,
+                    is_today: bool = False) -> dict:
+    hi, hi_t, lo, lo_t = _hl_with_time(day_s)
+    op = float(day_s.iloc[0])
+    cl = float(day_s.iloc[-1])
+    row: dict = {
+        "date": d.strftime("%Y-%m-%d"),
+        "label": d.strftime("%a, %b %d").replace(" 0", " "),
+        "full_label": d.strftime("%A, %b %d").replace(" 0", " "),
+        "is_today": is_today,
+        "open": op,
+        "high": hi,
+        "high_t": hi_t,
+        "low": lo,
+        "low_t": lo_t,
+        "close": cl,
+        "chg_pct": pct(op, cl),
+        "range_pct": round((hi - lo) / op * 100.0, 2) if (hi is not None and lo is not None and op > 0) else None,
+    }
+    row.update(_session_day_splits(day_s, day_ny))
+    return row
 
 
 def daily_levels(series: pd.Series, days: int = 5) -> list[dict]:
@@ -112,22 +146,26 @@ def daily_levels(series: pd.Series, days: int = 5) -> list[dict]:
         day_s = series[mask]
         if day_s.empty:
             continue
-        hi = float(day_s.max())
-        lo = float(day_s.min())
-        op = float(day_s.iloc[0])
-        cl = float(day_s.iloc[-1])
-        row = {
-            "date": d.strftime("%Y-%m-%d"),
-            "label": d.strftime("%a, %b %d").replace(" 0", " "),
-            "high": hi,
-            "low": lo,
-            "close": cl,
-            "chg_pct": pct(op, cl),
-            "range_pct": round((hi - lo) / op * 100.0, 2) if op > 0 else None,
-        }
-        row.update(_session_day_splits(day_s, ny_idx[mask]))
-        out.append(row)
+        out.append(_build_day_dict(day_s, ny_idx[mask], d, is_today=False))
     return out
+
+
+def current_day_levels(series: pd.Series) -> dict | None:
+    """Developing NY futures trading day levels (Today)."""
+    if series is None or series.empty:
+        return None
+    series = series.sort_index()
+    ny_idx = series.index.tz_convert(NEW_YORK)
+    sess_dates = (ny_idx + pd.Timedelta(hours=6)).normalize()
+    uniq_dates = sess_dates.unique()
+    if len(uniq_dates) == 0:
+        return None
+    d = uniq_dates[-1]
+    mask = sess_dates == d
+    day_s = series[mask]
+    if day_s.empty:
+        return None
+    return _build_day_dict(day_s, ny_idx[mask], d, is_today=True)
 
 
 def session_levels(series: pd.Series) -> dict:
@@ -224,6 +262,7 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         "pdl": pdl,
         "range_used": range_used,
         "levels_5d": daily_levels(series, days=5),
+        "today_levels": current_day_levels(series),
         "session_levels": session_levels(series),
     }
 

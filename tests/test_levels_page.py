@@ -76,9 +76,15 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
     assert "Today (Live)" in html
     assert "PDH / PDL" in html
     assert "Full Day" in html
-    assert "Asia Session" in html
+    assert "Asia (Tokyo)" in html
     assert "London Session" in html
     assert "New York Session" in html
+    assert "18:00–03:00 ET" not in html
+    # In Asia/Manila (November EST = 13h behind NY): Asia 8am-2pm, London 4pm-12:30am, NY 9pm-6am
+    assert "8:00 AM–2:00 PM" in html
+    assert "4:00 PM–12:30 AM" in html
+    assert "9:00 PM–6:00 AM" in html
+    assert "7:00 AM–6:00 AM" in html
     assert 'class="rangebar"' in html
 
     brief["hosted"] = True

@@ -1,7 +1,8 @@
 """Turns live session key levels and day-by-day PDH/PDL into a separate page (levels.html)."""
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from html import escape
+from zoneinfo import ZoneInfo
 
 from .dashboard import CSS as BASE_CSS, _num, _t
 
@@ -165,6 +166,19 @@ def _range_bar(key: str, row: dict, last: float | None) -> str:
     )
 
 
+def _session_window(day_str: str, tzname: str, oh: int, om: int, ch: int, cm: int,
+                    local_tz, prev_day_open: bool = False) -> str:
+    try:
+        d = date.fromisoformat(day_str)
+    except Exception:
+        return ""
+    tz = ZoneInfo(tzname)
+    od = (d - timedelta(days=1)) if prev_day_open else d
+    o = datetime(od.year, od.month, od.day, oh, om, tzinfo=tz)
+    c = datetime(d.year, d.month, d.day, ch, cm, tzinfo=tz)
+    return f"{_t(o, local_tz)}–{_t(c, local_tz)}"
+
+
 def _day_card(key: str, row: dict, last: float | None, tz, is_pdh: bool = False) -> str:
     is_today = bool(row.get("is_today"))
     card_cls = "day-card today" if is_today else ("day-card pdh-card" if is_pdh else "day-card")
@@ -191,25 +205,30 @@ def _day_card(key: str, row: dict, last: float | None, tz, is_pdh: bool = False)
     full_hi_lbl = "PDH" if is_pdh else "Day High"
     full_lo_lbl = "PDL" if is_pdh else "Day Low"
     close_lbl = "Last" if is_today else "Close"
+    day_str = row.get("date", "")
+    full_win = _session_window(day_str, "America/New_York", 18, 0, 17, 0, tz, prev_day_open=True)
+    asia_win = _session_window(day_str, "Asia/Tokyo", 9, 0, 15, 0, tz)
+    lon_win = _session_window(day_str, "Europe/London", 8, 0, 16, 30, tz)
+    ny_win = _session_window(day_str, "America/New_York", 8, 0, 17, 0, tz)
 
     boxes = "".join([
         f'<div class="sbox">'
-        f'<div class="sbox-head"><span class="sbox-name">Full Day</span><span class="sbox-time">18:00–17:00 ET</span></div>'
+        f'<div class="sbox-head"><span class="sbox-name">Full Day</span><span class="sbox-time">{escape(full_win)}</span></div>'
         f'{_level_line(key, full_hi_lbl, hi, row.get("high_t", ""), last, tz)}'
         f'{_level_line(key, full_lo_lbl, lo, row.get("low_t", ""), last, tz)}'
         f'</div>',
         f'<div class="sbox asia">'
-        f'<div class="sbox-head"><span class="sbox-name">Asia Session</span><span class="sbox-time">18:00–03:00 ET</span></div>'
+        f'<div class="sbox-head"><span class="sbox-name">Asia (Tokyo)</span><span class="sbox-time">{escape(asia_win)}</span></div>'
         f'{_level_line(key, "High", row.get("asia_h"), row.get("asia_h_t", ""), last, tz)}'
         f'{_level_line(key, "Low", row.get("asia_l"), row.get("asia_l_t", ""), last, tz)}'
         f'</div>',
         f'<div class="sbox london">'
-        f'<div class="sbox-head"><span class="sbox-name">London Session</span><span class="sbox-time">03:00–08:00 ET</span></div>'
+        f'<div class="sbox-head"><span class="sbox-name">London Session</span><span class="sbox-time">{escape(lon_win)}</span></div>'
         f'{_level_line(key, "High", row.get("london_h"), row.get("london_h_t", ""), last, tz)}'
         f'{_level_line(key, "Low", row.get("london_l"), row.get("london_l_t", ""), last, tz)}'
         f'</div>',
         f'<div class="sbox ny">'
-        f'<div class="sbox-head"><span class="sbox-name">New York Session</span><span class="sbox-time">08:00–17:00 ET</span></div>'
+        f'<div class="sbox-head"><span class="sbox-name">New York Session</span><span class="sbox-time">{escape(ny_win)}</span></div>'
         f'{_level_line(key, "High", row.get("ny_h"), row.get("ny_h_t", ""), last, tz)}'
         f'{_level_line(key, "Low", row.get("ny_l"), row.get("ny_l_t", ""), last, tz)}'
         f'</div>',
@@ -293,6 +312,11 @@ def render(brief: dict) -> str:
         )
         panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{_asset_pane(key, snap, tz)}</div>')
 
+    today_str = now.astimezone(tz).strftime("%Y-%m-%d")
+    asia_sub = _session_window(today_str, "Asia/Tokyo", 9, 0, 15, 0, tz)
+    lon_sub = _session_window(today_str, "Europe/London", 8, 0, 16, 30, tz)
+    ny_sub = _session_window(today_str, "America/New_York", 8, 0, 17, 0, tz)
+
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -318,7 +342,7 @@ def render(brief: dict) -> str:
 
 <section aria-labelledby="lvl-main-h">
   <h2 id="lvl-main-h">Day-by-day session key levels</h2>
-  <p class="sub">Each trading day's Full Day (PDH/PDL), Asia (18:00–03:00 ET), London (03:00–08:00 ET), and New York (08:00–17:00 ET) highs and lows, with the local time each level was set. Bar colors: gold = Asia, blue = London, purple = New York, white pin = current price.</p>
+  <p class="sub">Each trading day's Full Day (PDH/PDL), Asia ({escape(asia_sub)}), London ({escape(lon_sub)}), and New York ({escape(ny_sub)}) highs and lows in your time zone, with the exact time each level was set. Bar colors: gold = Asia, blue = London, purple = New York, white pin = current price.</p>
   <div class="tabs" role="tablist">{''.join(tabs)}</div>
   {''.join(panes)}
 </section>

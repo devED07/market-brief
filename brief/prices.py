@@ -5,11 +5,15 @@ import json
 import logging
 import warnings
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from .config import DATA_DIR
 from .util import NEW_YORK, atomic_write_json
+
+TOKYO = ZoneInfo("Asia/Tokyo")
+LONDON = ZoneInfo("Europe/London")
 
 # yfinance prints a lot of noise when a symbol hiccups; the app reports
 # problems in its own words instead.
@@ -85,10 +89,15 @@ def _hl_with_time(sub: pd.Series) -> tuple[float | None, str, float | None, str]
 
 
 def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str, float | str | None]:
-    hours = day_ny.hour
-    asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[(hours >= 18) | (hours < 3)])
-    lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[(hours >= 3) & (hours < 8)])
-    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(hours >= 8) & (hours < 17)])
+    tok = day_s.index.tz_convert(TOKYO)
+    tok_m = tok.hour * 60 + tok.minute
+    lon = day_s.index.tz_convert(LONDON)
+    lon_m = lon.hour * 60 + lon.minute
+    ny_m = day_ny.hour * 60 + day_ny.minute
+
+    asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[(tok_m >= 9 * 60) & (tok_m < 15 * 60)])
+    lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[(lon_m >= 8 * 60) & (lon_m < 16 * 60 + 30)])
+    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(ny_m >= 8 * 60) & (ny_m < 17 * 60)])
     return {
         "asia_h": asia_h,
         "asia_h_t": asia_h_t,

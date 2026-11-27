@@ -52,9 +52,31 @@ def fetch_series(symbol: str) -> pd.Series:
                 raise
     if df is None or df.empty or "Close" not in df:
         raise ValueError(f"no data for {symbol}")
+    df = df.copy()
+    df.index = pd.to_datetime(df.index, utc=True)
+    df = df.sort_index()
     s = df["Close"].dropna()
-    s.index = pd.to_datetime(s.index, utc=True)
-    return s.sort_index()
+    if "Open" in df:
+        s.attrs["ohlc_open"] = df["Open"].reindex(s.index).fillna(s)
+    if "High" in df:
+        s.attrs["ohlc_high"] = df["High"].reindex(s.index).fillna(s)
+    if "Low" in df:
+        s.attrs["ohlc_low"] = df["Low"].reindex(s.index).fillna(s)
+    return s
+
+
+def _ohlc_for(series: pd.Series, target: pd.Series | None = None) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Return (Open, High, Low) Series aligned to target/series, falling back to Close."""
+    ref = target if target is not None else series
+    attrs = getattr(series, "attrs", {}) or {}
+
+    def _pick(name: str) -> pd.Series:
+        col = attrs.get(name)
+        if isinstance(col, pd.Series) and not col.empty:
+            return col.reindex(ref.index).fillna(ref)
+        return ref
+
+    return _pick("ohlc_open"), _pick("ohlc_high"), _pick("ohlc_low")
 
 
 def price_at(series: pd.Series, when: datetime, max_gap_min: int = 20) -> float | None:
@@ -77,27 +99,38 @@ def pct(a: float | None, b: float | None) -> float | None:
     return (b - a) / a * 100.0
 
 
-def _hl_with_time(sub: pd.Series) -> tuple[float | None, str, float | None, str]:
-    if sub.empty:
+def _hl_with_time(day_s: pd.Series, hi_s: pd.Series | None = None,
+                  lo_s: pd.Series | None = None) -> tuple[float | None, str, float | None, str]:
+    h_src = day_s if hi_s is None else hi_s
+    l_src = day_s if lo_s is None else lo_s
+    if h_src.empty or l_src.empty:
         return None, "", None, ""
     return (
-        float(sub.max()),
-        sub.idxmax().to_pydatetime().isoformat(),
-        float(sub.min()),
-        sub.idxmin().to_pydatetime().isoformat(),
+        float(h_src.max()),
+        h_src.idxmax().to_pydatetime().isoformat(),
+        float(l_src.min()),
+        l_src.idxmin().to_pydatetime().isoformat(),
     )
 
 
-def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str, float | str | None]:
+def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex,
+                        hi_s: pd.Series | None = None,
+                        lo_s: pd.Series | None = None) -> dict[str, float | str | None]:
+    h_src = day_s if hi_s is None else hi_s
+    l_src = day_s if lo_s is None else lo_s
     tok = day_s.index.tz_convert(TOKYO)
     tok_m = tok.hour * 60 + tok.minute
     lon = day_s.index.tz_convert(LONDON)
     lon_m = lon.hour * 60 + lon.minute
     ny_m = day_ny.hour * 60 + day_ny.minute
 
-    asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[(tok_m >= 9 * 60) & (tok_m < 15 * 60)])
-    lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[(lon_m >= 8 * 60) & (lon_m < 16 * 60 + 30)])
-    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[(ny_m >= 9 * 60 + 30) & (ny_m < 17 * 60)])
+    m_asia = (tok_m >= 9 * 60) & (tok_m < 15 * 60)
+    m_lon = (lon_m >= 8 * 60 + 30) & (lon_m < 16 * 60 + 30)
+    m_ny = (ny_m >= 9 * 60 + 30) & (ny_m < 16 * 60)
+
+    asia_h, asia_h_t, asia_l, asia_l_t = _hl_with_time(day_s[m_asia], h_src[m_asia], l_src[m_asia])
+    lon_h, lon_h_t, lon_l, lon_l_t = _hl_with_time(day_s[m_lon], h_src[m_lon], l_src[m_lon])
+    ny_h, ny_h_t, ny_l, ny_l_t = _hl_with_time(day_s[m_ny], h_src[m_ny], l_src[m_ny])
     return {
         "asia_h": asia_h,
         "asia_h_t": asia_h_t,
@@ -115,9 +148,10 @@ def _session_day_splits(day_s: pd.Series, day_ny: pd.DatetimeIndex) -> dict[str,
 
 
 def _build_day_dict(day_s: pd.Series, day_ny: pd.DatetimeIndex, d: pd.Timestamp,
-                    is_today: bool = False) -> dict:
-    hi, hi_t, lo, lo_t = _hl_with_time(day_s)
-    op = float(day_s.iloc[0])
+                    is_today: bool = False, op_s: pd.Series | None = None,
+                    hi_s: pd.Series | None = None, lo_s: pd.Series | None = None) -> dict:
+    hi, hi_t, lo, lo_t = _hl_with_time(day_s, hi_s, lo_s)
+    op = float(op_s.iloc[0]) if op_s is not None and not op_s.empty else float(day_s.iloc[0])
     cl = float(day_s.iloc[-1])
     row: dict = {
         "date": d.strftime("%Y-%m-%d"),
@@ -133,7 +167,7 @@ def _build_day_dict(day_s: pd.Series, day_ny: pd.DatetimeIndex, d: pd.Timestamp,
         "chg_pct": pct(op, cl),
         "range_pct": round((hi - lo) / op * 100.0, 2) if (hi is not None and lo is not None and op > 0) else None,
     }
-    row.update(_session_day_splits(day_s, day_ny))
+    row.update(_session_day_splits(day_s, day_ny, hi_s, lo_s))
     return row
 
 
@@ -141,8 +175,9 @@ def daily_levels(series: pd.Series, days: int = 5) -> list[dict]:
     """Completed NY futures trading-day highs, lows, closes, and session levels (newest first)."""
     if series is None or series.empty:
         return []
-    series = series.sort_index()
-    ny_idx = series.index.tz_convert(NEW_YORK)
+    sorted_s = series.sort_index()
+    op_s, hi_s, lo_s = _ohlc_for(series, sorted_s)
+    ny_idx = sorted_s.index.tz_convert(NEW_YORK)
     sess_dates = (ny_idx + pd.Timedelta(hours=6)).normalize()
     uniq_dates = sess_dates.unique()
     if len(uniq_dates) < 2:
@@ -152,10 +187,11 @@ def daily_levels(series: pd.Series, days: int = 5) -> list[dict]:
     out: list[dict] = []
     for d in completed:
         mask = sess_dates == d
-        day_s = series[mask]
+        day_s = sorted_s[mask]
         if day_s.empty:
             continue
-        out.append(_build_day_dict(day_s, ny_idx[mask], d, is_today=False))
+        out.append(_build_day_dict(day_s, ny_idx[mask], d, is_today=False,
+                                   op_s=op_s[mask], hi_s=hi_s[mask], lo_s=lo_s[mask]))
     return out
 
 
@@ -163,47 +199,50 @@ def current_day_levels(series: pd.Series) -> dict | None:
     """Developing NY futures trading day levels (Today)."""
     if series is None or series.empty:
         return None
-    series = series.sort_index()
-    ny_idx = series.index.tz_convert(NEW_YORK)
+    sorted_s = series.sort_index()
+    op_s, hi_s, lo_s = _ohlc_for(series, sorted_s)
+    ny_idx = sorted_s.index.tz_convert(NEW_YORK)
     sess_dates = (ny_idx + pd.Timedelta(hours=6)).normalize()
     uniq_dates = sess_dates.unique()
     if len(uniq_dates) == 0:
         return None
     d = uniq_dates[-1]
     mask = sess_dates == d
-    day_s = series[mask]
+    day_s = sorted_s[mask]
     if day_s.empty:
         return None
-    return _build_day_dict(day_s, ny_idx[mask], d, is_today=True)
+    return _build_day_dict(day_s, ny_idx[mask], d, is_today=True,
+                           op_s=op_s[mask], hi_s=hi_s[mask], lo_s=lo_s[mask])
 
 
 def session_levels(series: pd.Series) -> dict:
     """Live session key levels (Today, Asia/London/NY, PDH/PDL/PDC, and 5-day swing)."""
     if series is None or series.empty:
         return {}
-    series = series.sort_index()
-    ny_idx = series.index.tz_convert(NEW_YORK)
+    sorted_s = series.sort_index()
+    op_s, hi_s, lo_s = _ohlc_for(series, sorted_s)
+    ny_idx = sorted_s.index.tz_convert(NEW_YORK)
     sess_dates = (ny_idx + pd.Timedelta(hours=6)).normalize()
     uniq_dates = sess_dates.unique()
     if len(uniq_dates) == 0:
         return {}
 
     cur_mask = sess_dates == uniq_dates[-1]
-    cur_s = series[cur_mask]
+    cur_s = sorted_s[cur_mask]
     out: dict[str, float | None] = {
-        "today_open": float(cur_s.iloc[0]),
-        "today_high": float(cur_s.max()),
-        "today_low": float(cur_s.min()),
+        "today_open": float(op_s[cur_mask].iloc[0]),
+        "today_high": float(hi_s[cur_mask].max()),
+        "today_low": float(lo_s[cur_mask].min()),
     }
-    out.update(_session_day_splits(cur_s, ny_idx[cur_mask]))
+    out.update(_session_day_splits(cur_s, ny_idx[cur_mask], hi_s[cur_mask], lo_s[cur_mask]))
 
     if len(uniq_dates) >= 2:
         prev_mask = sess_dates == uniq_dates[-2]
-        prev_s = series[prev_mask]
-        prev_splits = _session_day_splits(prev_s, ny_idx[prev_mask])
+        prev_s = sorted_s[prev_mask]
+        prev_splits = _session_day_splits(prev_s, ny_idx[prev_mask], hi_s[prev_mask], lo_s[prev_mask])
         out.update({
-            "pdh": float(prev_s.max()),
-            "pdl": float(prev_s.min()),
+            "pdh": float(hi_s[prev_mask].max()),
+            "pdl": float(lo_s[prev_mask].min()),
             "pdc": float(prev_s.iloc[-1]),
             "prev_asia_h": prev_splits["asia_h"],
             "prev_asia_l": prev_splits["asia_l"],
@@ -212,48 +251,49 @@ def session_levels(series: pd.Series) -> dict:
             "prev_ny_h": prev_splits["ny_h"],
             "prev_ny_l": prev_splits["ny_l"],
         })
-        wk_s = series[sess_dates.isin(uniq_dates[-6:-1])]
-        if not wk_s.empty:
-            out["week_h"] = float(wk_s.max())
-            out["week_l"] = float(wk_s.min())
+        wk_mask = sess_dates.isin(uniq_dates[-6:-1])
+        if wk_mask.any():
+            out["week_h"] = float(hi_s[wk_mask].max())
+            out["week_l"] = float(lo_s[wk_mask].min())
     return out
 
 
 def snapshot(series: pd.Series, now: datetime) -> dict:
-    series = series.sort_index()
-    last_time = series.index[-1].to_pydatetime()
-    last = float(series.iloc[-1])
+    sorted_s = series.sort_index()
+    op_s, hi_s, lo_s = _ohlc_for(series, sorted_s)
+    last_time = sorted_s.index[-1].to_pydatetime()
+    last = float(sorted_s.iloc[-1])
 
     def ago(minutes: int, max_gap_min: int) -> float | None:
         t = pd.Timestamp(last_time - timedelta(minutes=minutes))
-        sub = series.loc[:t]
+        sub = sorted_s.loc[:t]
         if sub.empty:
             return None
         if (t - sub.index[-1]) > pd.Timedelta(minutes=max_gap_min):
             return None
         return float(sub.iloc[-1])
 
-    ny_idx = series.index.tz_convert(NEW_YORK)
+    ny_idx = sorted_s.index.tz_convert(NEW_YORK)
     sess_dates = (ny_idx + pd.Timedelta(hours=6)).normalize()
     uniq_dates = sess_dates.unique()
     last_5 = uniq_dates[-5:]
-    window = series[sess_dates.isin(last_5)]
+    window = sorted_s[sess_dates.isin(last_5)]
     avg_5d = float(window.mean()) if len(window) > 50 else None
 
     pdh = pdl = range_used = None
     if len(uniq_dates) >= 2:
-        prev_day = series[sess_dates == uniq_dates[-2]]
-        if not prev_day.empty:
-            pdh = float(prev_day.max())
-            pdl = float(prev_day.min())
-        today_bars = series[sess_dates == uniq_dates[-1]]
+        prev_mask = sess_dates == uniq_dates[-2]
+        if prev_mask.any():
+            pdh = float(hi_s[prev_mask].max())
+            pdl = float(lo_s[prev_mask].min())
+        today_mask = sess_dates == uniq_dates[-1]
         prior_ranges = []
         for d in uniq_dates[-6:-1]:
-            day_s = series[sess_dates == d]
-            if len(day_s) >= 12 and float(day_s.iloc[0]) > 0:
-                prior_ranges.append((float(day_s.max()) - float(day_s.min())) / float(day_s.iloc[0]) * 100.0)
-        if not today_bars.empty and prior_ranges and float(today_bars.iloc[0]) > 0:
-            today_rng = (float(today_bars.max()) - float(today_bars.min())) / float(today_bars.iloc[0]) * 100.0
+            dm = sess_dates == d
+            if dm.sum() >= 12 and float(op_s[dm].iloc[0]) > 0:
+                prior_ranges.append((float(hi_s[dm].max()) - float(lo_s[dm].min())) / float(op_s[dm].iloc[0]) * 100.0)
+        if today_mask.any() and prior_ranges and float(op_s[today_mask].iloc[0]) > 0:
+            today_rng = (float(hi_s[today_mask].max()) - float(lo_s[today_mask].min())) / float(op_s[today_mask].iloc[0]) * 100.0
             avg_rng = sum(prior_ranges) / len(prior_ranges)
             if avg_rng > 0:
                 range_used = round(today_rng / avg_rng, 2)

@@ -510,9 +510,8 @@ def sessions_for_night(now: datetime, local_tz, market: dict | None = None) -> d
 
     defs = [
         ("Tokyo", "Asia/Tokyo", (9, 0), (15, 0)),
-        ("London", "Europe/London", (8, 0), (16, 30)),
-        ("New York", "America/New_York", (8, 0), (17, 0)),
-        ("US30 cash", "America/New_York", (9, 30), (16, 0)),
+        ("London", "Europe/London", (8, 30), (16, 30)),
+        ("New York", "America/New_York", (9, 30), (16, 0)),
     ]
     rows = []
     for name, tzname, (oh, om), (ch, cm) in defs:

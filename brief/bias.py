@@ -59,7 +59,8 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
     end = t + timedelta(minutes=rel["window_min"])
     out = dict(rel)
     out.update({"status": "upcoming", "hawk": None, "verdict": "", "zn_pct": None,
-                "dxy_pct": None, "gold_pct": None, "us30_pct": None, "us100_pct": None})
+                "dxy_pct": None, "gold_pct": None, "us30_pct": None, "us100_pct": None,
+                "gold_1h_pct": None, "us30_1h_pct": None, "us100_1h_pct": None})
 
     if rel.get("all_day"):
         out["status"] = "all_day"
@@ -78,6 +79,11 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
         moves[key] = pct(price_at(s, t), price_at(s, end)) if s is not None else None
     out["zn_pct"], out["dxy_pct"] = moves["treasury_10y"], moves["dollar"]
     out["gold_pct"], out["us30_pct"], out["us100_pct"] = moves["gold"], moves["us30"], moves["us100"]
+    if now >= t + timedelta(minutes=60 + YAHOO_DELAY_MIN):
+        t_1h = t + timedelta(minutes=60)
+        for key in ("gold", "us30", "us100"):
+            s = series.get(key)
+            out[f"{key}_1h_pct"] = pct(price_at(s, t), price_at(s, t_1h)) if s is not None else None
 
     parts = []
     if out["zn_pct"] is not None:

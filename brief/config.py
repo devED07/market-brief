@@ -10,6 +10,7 @@ APP_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = APP_DIR / "data"
 SETTINGS_FILE = APP_DIR / "settings.ini"
 DASHBOARD_FILE = APP_DIR / "dashboard.html"
+HISTORY_PAGE_FILE = APP_DIR / "history.html"
 
 
 @dataclass

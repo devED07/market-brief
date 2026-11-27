@@ -32,6 +32,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
   padding-bottom:14px;border-bottom:1px solid var(--line)}
 .brand{font-weight:800;font-stretch:75%;font-size:22px;letter-spacing:.01em}
 .brand span{color:var(--gold)}
+.nav{display:flex;gap:6px;align-items:center}
+.nav a{padding:4px 11px;border-radius:5px;font-size:13px;font-weight:600;text-decoration:none;
+  border:1px solid var(--line);color:var(--muted);background:var(--panel)}
+.nav a:hover{color:var(--text)}
+.nav a.active{background:var(--panel-2);color:var(--text);border-color:var(--event)}
 .clock{color:var(--muted);font-size:14px}
 .clock b{color:var(--text);font-weight:600}
 .fresh{display:flex;gap:18px;color:var(--muted);font-size:13px}
@@ -793,6 +798,10 @@ def render(brief: dict) -> str:
 
 <header class="top">
   <div><span class="brand">Market <span>brief</span></span></div>
+  <nav class="nav" aria-label="Views">
+    <a class="active" href="{'index.html' if brief.get('hosted') else 'dashboard.html'}">Live Brief</a>
+    <a href="history.html">History &amp; Levels</a>
+  </nav>
   <div class="clock"><b id="clock">{_t(now, tz, "%a, %b %d %I:%M %p")}</b></div>
   <div class="fresh">
     <span><span class="dot{' stale' if stale else ''}" id="dot"></span>Updated {_t(now, tz)}<span id="age"></span></span>

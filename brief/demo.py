@@ -93,9 +93,9 @@ def build():
     # Reactions baked into the fake prices: (time, minutes, {key: % move})
     reactions = [
         (_ny(now, -3, 10, 0), 15, {"treasury_10y": +0.18, "dollar": -0.22, "gold": +0.55, "us30": +0.20, "us100": +0.30}),
-        (_ny(now, -2, 10, 0), 15, {"treasury_10y": -0.02, "dollar": +0.03, "gold": -0.05, "us30": +0.02}),
-        (_ny(now, -2, 8, 30), 15, {"treasury_10y": -0.08, "dollar": +0.12, "gold": -0.20, "us30": -0.05}),
-        (_ny(now, -1, 8, 15), 15, {"treasury_10y": -0.15, "dollar": +0.24, "gold": -0.40, "us30": -0.15}),
+        (_ny(now, -2, 10, 0), 15, {"treasury_10y": -0.02, "dollar": +0.03, "gold": -0.05, "us30": +0.02, "us100": +0.05}),
+        (_ny(now, -2, 8, 30), 15, {"treasury_10y": -0.08, "dollar": +0.12, "gold": -0.20, "us30": -0.05, "us100": -0.10}),
+        (_ny(now, -1, 8, 15), 15, {"treasury_10y": -0.15, "dollar": +0.24, "gold": -0.40, "us30": -0.15, "us100": -0.28}),
         (_ny(now, -1, 10, 0), 15, {"treasury_10y": -0.30, "dollar": +0.42, "gold": -0.90, "us30": -0.45, "us100": -0.70}),
     ]
     targets = {"gold": 4282.4, "us30": 47655.0, "us100": 25480.0, "dollar": 100.21, "treasury_10y": 111.92, "vix": 17.84}

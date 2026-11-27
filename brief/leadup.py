@@ -18,7 +18,7 @@ from .config import DATA_DIR
 from .util import atomic_write_json
 
 LOG_FILE = DATA_DIR / "release_log.json"
-KEEP_DAYS = 45
+KEEP_DAYS = 180
 
 _DOMINANT_TITLES = (
     "non-farm", "cpi", "federal funds", "fomc", "pce", "gdp",
@@ -174,16 +174,39 @@ def update_log(releases: list[dict], now: datetime, persist: bool = True) -> lis
         verdict = rel["verdict"] if rel.get("hawk") is not None else (prev.get("verdict") or rel.get("verdict", ""))
         if hawk is None and not merged_data:
             continue
+        events = rel.get("events") or []
+        ev0 = events[0] if events else {}
+        actual = ev0.get("actual") or next((e.get("actual") for e in events if e.get("actual")), "") or prev.get("actual", "")
+        forecast = ev0.get("forecast", "") or prev.get("forecast", "")
+        previous = ev0.get("previous", "") or prev.get("previous", "")
+
+        def _pick(field: str):
+            val = rel.get(field)
+            return val if val is not None else prev.get(field)
+
         log[key] = {
             "time": rel["time"],
             "headline": rel["headline"],
-            "titles": [e["title"] for e in rel["events"]],
+            "titles": [e["title"] for e in events] or prev.get("titles", []),
             "hawk": hawk,
             "verdict": verdict,
             "data": merged_data,
             "weight": rel.get("weight", prev.get("weight", 1.0)),
             "impact": rel.get("impact", prev.get("impact", "High")),
             "lead_only": rel.get("lead_only", prev.get("lead_only", False)),
+            "window_min": rel.get("window_min", prev.get("window_min", 15)),
+            "forecast": forecast,
+            "previous": previous,
+            "actual": actual,
+            "zn_pct": _pick("zn_pct"),
+            "dxy_pct": _pick("dxy_pct"),
+            "gold_pct": _pick("gold_pct"),
+            "us30_pct": _pick("us30_pct"),
+            "us100_pct": _pick("us100_pct"),
+            "gold_1h_pct": _pick("gold_1h_pct"),
+            "us30_1h_pct": _pick("us30_1h_pct"),
+            "us100_1h_pct": _pick("us100_1h_pct"),
+            "discrepancy": rel.get("discrepancy") or prev.get("discrepancy", ""),
         }
     rows = sorted((r for r in log.values() if now - r["time"] < timedelta(days=KEEP_DAYS)),
                   key=lambda r: r["time"])

@@ -73,6 +73,56 @@ def pct(a: float | None, b: float | None) -> float | None:
     return (b - a) / a * 100.0
 
 
+def daily_levels(series: pd.Series, days: int = 5) -> list[dict]:
+    """Completed NY trading-day highs, lows, closes, and session levels (newest first)."""
+    if series is None or series.empty:
+        return []
+    series = series.sort_index()
+    ny_idx = series.index.tz_convert(NEW_YORK)
+    ny_dates = ny_idx.normalize()
+    uniq_dates = ny_dates.unique()
+    if len(uniq_dates) < 2:
+        return []
+    completed = list(uniq_dates[-(days + 1):-1])[::-1]
+
+    def _hl(sub: pd.Series) -> tuple[float | None, float | None]:
+        if sub.empty:
+            return None, None
+        return float(sub.max()), float(sub.min())
+
+    out: list[dict] = []
+    for d in completed:
+        mask = ny_dates == d
+        day_s = series[mask]
+        if day_s.empty:
+            continue
+        day_ny = ny_idx[mask]
+        hi = float(day_s.max())
+        lo = float(day_s.min())
+        op = float(day_s.iloc[0])
+        cl = float(day_s.iloc[-1])
+        hours = day_ny.hour
+        asia_h, asia_l = _hl(day_s[(hours >= 0) & (hours < 3)])
+        lon_h, lon_l = _hl(day_s[(hours >= 3) & (hours < 8)])
+        ny_h, ny_l = _hl(day_s[(hours >= 8) & (hours < 17)])
+        out.append({
+            "date": d.strftime("%Y-%m-%d"),
+            "label": d.strftime("%a, %b %d").replace(" 0", " "),
+            "high": hi,
+            "low": lo,
+            "close": cl,
+            "chg_pct": pct(op, cl),
+            "range_pct": round((hi - lo) / op * 100.0, 2) if op > 0 else None,
+            "asia_h": asia_h,
+            "asia_l": asia_l,
+            "london_h": lon_h,
+            "london_l": lon_l,
+            "ny_h": ny_h,
+            "ny_l": ny_l,
+        })
+    return out
+
+
 def snapshot(series: pd.Series, now: datetime) -> dict:
     series = series.sort_index()
     last_time = series.index[-1].to_pydatetime()
@@ -123,6 +173,7 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         "pdh": pdh,
         "pdl": pdl,
         "range_used": range_used,
+        "levels_5d": daily_levels(series, days=5),
     }
 
 

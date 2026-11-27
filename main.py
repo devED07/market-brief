@@ -25,11 +25,12 @@ from brief import calendar_feed as C
 from brief import dashboard as D
 from brief import fred as F
 from brief import geo as G
+from brief import history_page as H
 from brief import leadup as L
 from brief import news as N
 from brief import prices as P
 from brief import telegram as T
-from brief.config import DASHBOARD_FILE, DATA_DIR, load_settings
+from brief.config import DASHBOARD_FILE, DATA_DIR, HISTORY_PAGE_FILE, load_settings
 from brief.util import atomic_write_json, atomic_write_text, fmt_time
 
 try:
@@ -186,6 +187,7 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         "tz": tz,
         "symbols": symbols,
         "releases": releases,
+        "release_log": log,
         "next_release": upcoming_high[0] if upcoming_high else None,
         "snaps": snaps,
         "headlines": headlines,
@@ -203,8 +205,11 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         "clock_offset_ms": clock_offset_ms,
     }
     html = D.render(brief)
+    history_html = H.render(brief)
+    brief["history_html"] = history_html
     if not hosted:
         atomic_write_text(DASHBOARD_FILE, html)
+        atomic_write_text(HISTORY_PAGE_FILE, history_html)
 
     if not demo:
         err = T.process(settings, brief, now)
@@ -269,7 +274,8 @@ def run_hosted(settings) -> None:
             brief, html = run_cycle(settings, False, memory, hosted=True)
             print_summary(brief, tz)
             PUB.publish(html, int(brief["now"].timestamp() * 1000),
-                        f"Update {brief['now']:%Y-%m-%d %H:%M} UTC")
+                        f"Update {brief['now']:%Y-%m-%d %H:%M} UTC",
+                        history_html=brief.get("history_html"))
             print("           Published to GitHub Pages.")
             now = datetime.now(timezone.utc)
             last_until = _stay_until(brief["releases"], now)

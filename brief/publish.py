@@ -140,12 +140,14 @@ def _push_branch(work: Path, branch: str, summary: str, label: str) -> None:
     raise RuntimeError(f"Couldn't publish {label}: {last_error}")
 
 
-def publish(html: str, generated_ms: int, summary: str) -> None:
+def publish(html: str, generated_ms: int, summary: str, history_html: str | None = None) -> None:
     """Replaces gh-pages with the public dashboard and `state` with internal state."""
     site_work = Path(tempfile.mkdtemp(prefix="mb-site-"))
     state_work = Path(tempfile.mkdtemp(prefix="mb-state-pub-"))
     try:
         atomic_write_text(site_work / "index.html", html)
+        if history_html is not None:
+            atomic_write_text(site_work / "history.html", history_html)
         atomic_write_json(site_work / "meta.json", {"generated": generated_ms})
         atomic_write_text(site_work / ".nojekyll", "")
 

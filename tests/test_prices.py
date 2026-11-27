@@ -91,3 +91,71 @@ def test_snaps_cache_roundtrip_and_ttl(tmp_path, monkeypatch):
 
     wknd = P.load_snaps_cache(now + timedelta(hours=20), max_age_min=120, weekend=True)
     assert "gold" in wknd and "vix" in wknd
+
+
+def test_fetch_oanda_series_and_fallback(monkeypatch):
+    import json
+
+    class _FakeResp:
+        def __init__(self, body: dict):
+            self._raw = json.dumps(body).encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    seen = {}
+
+    def fake_opener(req, timeout=20):
+        seen["url"] = req.full_url
+        seen["auth"] = req.get_header("Authorization")
+        return _FakeResp({
+            "instrument": "XAU_USD",
+            "candles": [
+                {"time": "2026-11-27T01:00:00Z", "mid": {"o": "3650.0", "h": "3666.47", "l": "3648.0", "c": "3660.0"}},
+                {"time": "2026-11-27T01:05:00Z", "mid": {"o": "3660.0", "h": "3662.0", "l": "3640.5", "c": "3655.0"}},
+                {"time": "2026-11-27T01:10:00Z", "mid": {"o": "3655.0", "h": "3658.0", "l": "3651.0", "c": "3654.0"}},
+            ],
+        })
+
+    s = P.fetch_oanda_series("XAU_USD", "tok-123", env="practice", opener=fake_opener)
+    assert "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles" in seen["url"]
+    assert seen["auth"] == "Bearer tok-123"
+    assert s.attrs["source"] == "oanda"
+    assert float(s.attrs["ohlc_high"].max()) == 3666.47
+    assert float(s.attrs["ohlc_low"].min()) == 3640.5
+    assert float(s.attrs["ohlc_open"].iloc[0]) == 3650.0
+
+    now = datetime(2026, 11, 27, 1, 15, tzinfo=timezone.utc)
+    snap = P.snapshot(s, now)
+    assert snap["source"] == "oanda"
+    assert snap["last"] == 3654.0
+
+    # fetch_all uses OANDA when available and falls back to Yahoo when OANDA raises
+    def fake_oanda(instrument, api_key, env="practice", count=3000, opener=None):
+        if instrument == "US30_USD":
+            raise RuntimeError("boom")
+        return s
+
+    fallback_idx = pd.date_range("2026-11-27T01:00:00Z", periods=3, freq="5min", tz="UTC")
+    fallback_s = pd.Series([50500.0, 50550.0, 50600.0], index=fallback_idx)
+    fallback_s.attrs["source"] = "yahoo"
+    monkeypatch.setattr(P, "fetch_oanda_series", fake_oanda)
+    monkeypatch.setattr(P, "fetch_series", lambda sym: fallback_s)
+
+    series, snaps, problems = P.fetch_all(
+        {"gold": "GC=F", "us30": "YM=F"},
+        now=now,
+        oanda_key="tok-123",
+        oanda_env="practice",
+        oanda_symbols={"gold": "XAU_USD", "us30": "US30_USD"},
+    )
+    assert snaps["gold"]["source"] == "oanda"
+    assert snaps["us30"]["source"] == "yahoo"
+    assert "falling back to YM=F" in problems[0]
+    assert len(series) == 2

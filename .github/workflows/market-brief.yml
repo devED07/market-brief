@@ -94,6 +94,8 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CONNECT_CODE: ${{ secrets.TELEGRAM_CONNECT_CODE }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}   # optional, free: real release numbers
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }} # optional, free: OANDA CFD 5-min candles
+          OANDA_ENV: ${{ vars.OANDA_ENV || 'practice' }}
           PYTHONUNBUFFERED: "1"
         run: python main.py --hosted
 

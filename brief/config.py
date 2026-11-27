@@ -27,6 +27,12 @@ class Settings:
     treasury_10y: str = "ZN=F"
     vix: str = "^VIX"
 
+    oanda_api_key: str = ""
+    oanda_env: str = "practice"
+    oanda_gold: str = "XAU_USD"
+    oanda_us30: str = "US30_USD"
+    oanda_us100: str = "NAS100_USD"
+
     fred_key: str = ""
 
     telegram_enabled: bool = False
@@ -71,6 +77,16 @@ def load_settings() -> Settings:
         if val:
             setattr(s, key, val)
 
+    if cp.has_section("oanda"):
+        oa = cp["oanda"]
+        s.oanda_api_key = (oa.get("api_key") or "").strip()
+        env_oa = (oa.get("env") or s.oanda_env).strip().lower()
+        s.oanda_env = "live" if env_oa == "live" else "practice"
+        for key, attr in (("gold", "oanda_gold"), ("us30", "oanda_us30"), ("us100", "oanda_us100")):
+            val = (oa.get(key) or "").strip()
+            if val:
+                setattr(s, attr, val)
+
     if cp.has_section("fred"):
         s.fred_key = (cp["fred"].get("api_key") or "").strip()
 
@@ -89,6 +105,13 @@ def load_settings() -> Settings:
         s.telegram_enabled = True
         s.telegram_token = env_token
         s.telegram_chat_id = env_chat
+
+    env_oanda_key = os.environ.get("OANDA_API_KEY", "").strip()
+    if env_oanda_key:
+        s.oanda_api_key = env_oanda_key
+    env_oanda_env = os.environ.get("OANDA_ENV", "").strip().lower()
+    if env_oanda_env in ("practice", "live"):
+        s.oanda_env = env_oanda_env
 
     DATA_DIR.mkdir(exist_ok=True)
     return s

@@ -126,7 +126,13 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         if note:
             problems.append(note)
 
-        series, snaps, price_problems = P.fetch_all(symbols, now)
+        oanda_symbols = {"gold": settings.oanda_gold, "us30": settings.oanda_us30, "us100": settings.oanda_us100}
+        series, snaps, price_problems = P.fetch_all(
+            symbols, now,
+            oanda_key=settings.oanda_api_key,
+            oanda_env=settings.oanda_env,
+            oanda_symbols=oanda_symbols,
+        )
         cached_snaps = P.load_snaps_cache(now, weekend=market.get("reason") in ("weekend", "holiday"))
         for key in symbols:
             if key not in snaps:
@@ -136,6 +142,9 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
                     snaps[key] = memory["snaps"][key]
                 elif key in cached_snaps:
                     snaps[key] = cached_snaps[key]
+        for key in ("gold", "us30", "us100"):
+            if snaps.get(key, {}).get("source") == "oanda" and oanda_symbols.get(key):
+                symbols[key] = oanda_symbols[key]
         problems.extend(price_problems)
         memory.setdefault("series", {}).update(series)
         memory.setdefault("snaps", {}).update(snaps)

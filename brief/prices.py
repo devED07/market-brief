@@ -3,6 +3,8 @@ about 10 minutes, which is fine for context and bias but not for entries."""
 
 import json
 import logging
+import urllib.parse
+import urllib.request
 import warnings
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -30,6 +32,59 @@ LABELS = {
     "treasury_10y": "10Y T-note",
     "vix": "VIX",
 }
+
+
+OANDA_HOSTS = {
+    "practice": "https://api-fxpractice.oanda.com",
+    "live": "https://api-fxtrade.oanda.com",
+}
+
+
+def fetch_oanda_series(instrument: str, api_key: str, env: str = "practice",
+                       count: int = 3000, opener=None) -> pd.Series:
+    """5-minute CFD midpoint candles from OANDA v20 REST API, indexed in UTC."""
+    host = OANDA_HOSTS.get((env or "practice").lower(), OANDA_HOSTS["practice"])
+    url = (
+        f"{host}/v3/instruments/{urllib.parse.quote(instrument, safe='')}/candles"
+        f"?granularity=M5&count={count}&price=M"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept-Datetime-Format": "RFC3339",
+            "User-Agent": "market-brief/1.0",
+        },
+    )
+    with (opener or urllib.request.urlopen)(req, timeout=20) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    times, opens, highs, lows, closes = [], [], [], [], []
+    for c in payload.get("candles") or []:
+        mid = c.get("mid") or {}
+        ts = c.get("time")
+        if not ts or not all(k in mid for k in ("o", "h", "l", "c")):
+            continue
+        times.append(ts)
+        opens.append(float(mid["o"]))
+        highs.append(float(mid["h"]))
+        lows.append(float(mid["l"]))
+        closes.append(float(mid["c"]))
+
+    if not times:
+        raise ValueError(f"no OANDA data for {instrument}")
+
+    idx = pd.to_datetime(times, utc=True)
+    df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes}, index=idx)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    s = df["Close"].dropna()
+    if s.empty:
+        raise ValueError(f"no OANDA data for {instrument}")
+    s.attrs["ohlc_open"] = df["Open"].reindex(s.index).fillna(s)
+    s.attrs["ohlc_high"] = df["High"].reindex(s.index).fillna(s)
+    s.attrs["ohlc_low"] = df["Low"].reindex(s.index).fillna(s)
+    s.attrs["source"] = "oanda"
+    return s
 
 
 def fetch_series(symbol: str) -> pd.Series:
@@ -62,6 +117,7 @@ def fetch_series(symbol: str) -> pd.Series:
         s.attrs["ohlc_high"] = df["High"].reindex(s.index).fillna(s)
     if "Low" in df:
         s.attrs["ohlc_low"] = df["Low"].reindex(s.index).fillna(s)
+    s.attrs["source"] = "yahoo"
     return s
 
 
@@ -310,6 +366,7 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         "pdh": pdh,
         "pdl": pdl,
         "range_used": range_used,
+        "source": (getattr(series, "attrs", {}) or {}).get("source", "yahoo"),
         "levels_5d": daily_levels(series, days=5),
         "today_levels": current_day_levels(series),
         "session_levels": session_levels(series),
@@ -358,15 +415,28 @@ def load_snaps_cache(now: datetime, max_age_min: int = 120, weekend: bool = Fals
     return out
 
 
-def fetch_all(symbols: dict[str, str], now: datetime | None = None) -> tuple[dict, dict, list[str]]:
+def fetch_all(symbols: dict[str, str], now: datetime | None = None,
+              oanda_key: str = "", oanda_env: str = "practice",
+              oanda_symbols: dict[str, str] | None = None) -> tuple[dict, dict, list[str]]:
     """Returns (series_by_key, snapshot_by_key, problems)."""
     now = now or datetime.now(timezone.utc)
     series, snaps, problems = {}, {}, []
     for key, symbol in symbols.items():
-        try:
-            s = fetch_series(symbol)
-            series[key] = s
-            snaps[key] = snapshot(s, now)
-        except Exception as exc:
-            problems.append(f"{LABELS.get(key, key)} ({symbol}): {exc.__class__.__name__}")
+        s = None
+        oanda_sym = (oanda_symbols or {}).get(key, "")
+        if oanda_key and oanda_sym:
+            try:
+                s = fetch_oanda_series(oanda_sym, oanda_key, env=oanda_env)
+            except Exception as exc:
+                problems.append(
+                    f"{LABELS.get(key, key)} OANDA ({oanda_sym}): {exc.__class__.__name__}, falling back to {symbol}"
+                )
+        if s is None:
+            try:
+                s = fetch_series(symbol)
+            except Exception as exc:
+                problems.append(f"{LABELS.get(key, key)} ({symbol}): {exc.__class__.__name__}")
+                continue
+        series[key] = s
+        snaps[key] = snapshot(s, now)
     return series, snaps, problems

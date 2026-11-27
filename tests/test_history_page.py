@@ -83,18 +83,18 @@ def test_score_release_computes_1h_follow_through_and_log_persists(tmp_path, mon
 def test_history_page_renders_levels_releases_and_nav(tmp_path, monkeypatch):
     monkeypatch.setattr(M, "DASHBOARD_FILE", tmp_path / "dashboard.html")
     monkeypatch.setattr(M, "HISTORY_PAGE_FILE", tmp_path / "history.html")
+    monkeypatch.setattr(M, "LEVELS_PAGE_FILE", tmp_path / "levels.html")
     settings = load_settings()
     brief, dash_html = M.run_cycle(settings, demo=True, memory={})
     hist_html = brief["history_html"]
 
     assert 'href="history.html"' in dash_html
+    assert 'href="levels.html"' in dash_html
     assert 'href="dashboard.html"' in hist_html
-    assert "PDH / PDL" in hist_html
-    assert 'id="lvl-gold"' in hist_html
-    assert 'id="lvl-us30"' in hist_html
-    assert 'id="lvl-us100"' in hist_html
+    assert 'href="levels.html"' in hist_html
     assert "ISM Services PMI" in hist_html
     assert "Bullish" in hist_html or "Bearish" in hist_html
+    assert "PDH / PDL" not in hist_html
 
     # Hosted mode links to index.html and shows Reversed badge when 1h flips
     brief["hosted"] = True

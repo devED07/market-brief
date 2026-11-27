@@ -800,7 +800,8 @@ def render(brief: dict) -> str:
   <div><span class="brand">Market <span>brief</span></span></div>
   <nav class="nav" aria-label="Views">
     <a class="active" href="{'index.html' if brief.get('hosted') else 'dashboard.html'}">Live Brief</a>
-    <a href="history.html">History &amp; Levels</a>
+    <a href="levels.html">Session Levels</a>
+    <a href="history.html">Release History</a>
   </nav>
   <div class="clock"><b id="clock">{_t(now, tz, "%a, %b %d %I:%M %p")}</b></div>
   <div class="fresh">

@@ -1,24 +1,15 @@
-"""Turns the release log and 5-day levels into a separate page (history.html)."""
+"""Turns the 180-day release archive into a separate page (history.html)."""
 
 from html import escape
 
-from .dashboard import CSS as BASE_CSS, _num, _t
+from .dashboard import CSS as BASE_CSS, _t
 
 EXTRA_CSS = """
-.nav{display:flex;gap:6px;align-items:center}
+.nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .nav a{padding:4px 11px;border-radius:5px;font-size:13px;font-weight:600;text-decoration:none;
   border:1px solid var(--line);color:var(--muted);background:var(--panel)}
 .nav a:hover{color:var(--text)}
 .nav a.active{background:var(--panel-2);color:var(--text);border-color:var(--event)}
-
-.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.tab{background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:6px;
-  padding:7px 14px;font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer}
-.tab span{font-weight:400;font-size:12px;color:var(--faint);margin-left:6px}
-.tab.active{background:var(--panel-2);color:var(--text);border-color:var(--c,var(--event))}
-.tab.gold{--c:var(--gold)} .tab.us30{--c:var(--us30)} .tab.us100{--c:var(--us100)}
-.lvl-pane{display:none}
-.lvl-pane.active{display:block}
 
 .tbl-wrap{overflow-x:auto}
 table.hist{width:100%;border-collapse:collapse;font-size:13.5px;min-width:680px}
@@ -30,8 +21,6 @@ table.hist td.wrap-txt{white-space:normal;min-width:190px}
 
 .badge{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;
   margin-left:6px;border:1px solid var(--line);color:var(--muted);vertical-align:1px}
-.badge.pdh{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 55%,transparent);
-  background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
 .badge.rev{color:var(--event);border-color:color-mix(in srgb,var(--event) 50%,transparent);margin-left:4px}
 .badge.disc{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 50%,transparent);margin-left:0;margin-top:3px}
 .subline{display:block;color:var(--faint);font-size:12px;margin-top:2px}
@@ -53,16 +42,6 @@ tr.hidden-row{display:none}
 
 JS = """
 (function(){
-  // Asset tabs for 5-day levels
-  document.querySelectorAll("[data-tab]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      var key = btn.getAttribute("data-tab");
-      document.querySelectorAll("[data-tab]").forEach(function(b){ b.classList.toggle("active", b === btn); });
-      document.querySelectorAll(".lvl-pane").forEach(function(p){ p.classList.toggle("active", p.id === "lvl-" + key); });
-    });
-  });
-
-  // Release history filter + summary
   var cat = "all";
   var searchEl = document.getElementById("rel-search");
   var highEl = document.getElementById("rel-high");
@@ -149,76 +128,6 @@ JS = """
   applyFilters();
 })();
 """
-
-
-def _hl_pair(key: str, hi: float | None, lo: float | None) -> str:
-    if hi is None or lo is None:
-        return '<span class="na">—</span>'
-    return f"{_num(key, hi)} / {_num(key, lo)}"
-
-
-def _levels_section(brief: dict) -> str:
-    snaps = brief.get("snaps") or {}
-    syms = brief.get("symbols") or {}
-    assets = (("gold", "Gold"), ("us30", "US30"), ("us100", "US100"))
-
-    tabs = []
-    panes = []
-    for idx, (key, name) in enumerate(assets):
-        snap = snaps.get(key) or {}
-        last = snap.get("last")
-        last_txt = _num(key, last) if last is not None else "n/a"
-        active = " active" if idx == 0 else ""
-        tabs.append(
-            f'<button type="button" class="tab {key}{active}" data-tab="{key}">'
-            f'{escape(name)}<span>{escape(syms.get(key, ""))} · {last_txt}</span></button>'
-        )
-
-        levels = snap.get("levels_5d") or []
-        if not levels:
-            body = '<p class="empty">Not enough intraday bars yet to build 5 completed trading days.</p>'
-        else:
-            rows = []
-            for r_idx, row in enumerate(levels):
-                badge = '<span class="badge pdh">PDH / PDL</span>' if r_idx == 0 else ""
-                rng = f'{row["range_pct"]:.2f}%' if row.get("range_pct") is not None else "—"
-                if last is None:
-                    vs_now = '<span class="na">—</span>'
-                elif last > row["high"]:
-                    vs_now = '<span class="up">Above high</span>'
-                elif last < row["low"]:
-                    vs_now = '<span class="down">Below low</span>'
-                else:
-                    vs_now = '<span class="na">Inside</span>'
-                rows.append(
-                    f'<tr>'
-                    f'<td class="left">{escape(row["label"])}{badge}</td>'
-                    f'<td>{_num(key, row["high"])}</td>'
-                    f'<td>{_num(key, row["low"])}</td>'
-                    f'<td>{_num(key, row["close"])}</td>'
-                    f'<td>{rng}</td>'
-                    f'<td>{_hl_pair(key, row.get("asia_h"), row.get("asia_l"))}</td>'
-                    f'<td>{_hl_pair(key, row.get("london_h"), row.get("london_l"))}</td>'
-                    f'<td>{_hl_pair(key, row.get("ny_h"), row.get("ny_l"))}</td>'
-                    f'<td>{vs_now}</td>'
-                    f'</tr>'
-                )
-            body = f"""<div class="tbl-wrap"><table class="hist">
-<thead><tr>
-  <th class="left">Day</th><th>Daily High</th><th>Daily Low</th><th>Close</th><th>Range</th>
-  <th>Asia (0–3 ET)</th><th>London (3–8 ET)</th><th>New York (8–17 ET)</th><th>vs Now</th>
-</tr></thead>
-<tbody>{''.join(rows)}</tbody>
-</table></div>"""
-        panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{body}</div>')
-
-    return f"""
-<section aria-labelledby="lvl-h">
-  <h2 id="lvl-h">Previous 5 trading days: PDH / PDL &amp; session levels</h2>
-  <p class="sub">Completed New York trading days from 5-minute bars (newest first). Row 1 is the prior day's high and low (PDH / PDL).</p>
-  <div class="tabs" role="tablist">{''.join(tabs)}</div>
-  <div class="panel">{''.join(panes)}</div>
-</section>"""
 
 
 def _effect_cell(pct_15m: float | None, pct_1h: float | None) -> str:
@@ -330,7 +239,7 @@ def render(brief: dict) -> str:
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex, nofollow, noarchive">
-<title>Market brief — History &amp; Levels</title>
+<title>Market brief — Release History</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
 <style>{BASE_CSS}{EXTRA_CSS}</style>
@@ -340,7 +249,8 @@ def render(brief: dict) -> str:
   <div><span class="brand">Market <span>brief</span></span></div>
   <nav class="nav" aria-label="Views">
     <a href="{live_href}">Live Brief</a>
-    <a class="active" href="history.html">History &amp; Levels</a>
+    <a href="levels.html">Session Levels</a>
+    <a class="active" href="history.html">Release History</a>
   </nav>
   <div class="fresh">
     <span><span class="dot{' stale' if stale else ''}"></span>Updated {_t(now, tz)}</span>
@@ -348,12 +258,10 @@ def render(brief: dict) -> str:
   </div>
 </header>
 
-{_levels_section(brief)}
-
 {_releases_section(brief, tz)}
 
 <footer>
-  <p>Archived releases are retained for 180 days. Forecast &amp; previous values come from the Forex Factory calendar feed; official actuals come from FRED; price reactions and PDH/PDL session levels are computed from Yahoo Finance 5-minute bars.</p>
+  <p>Archived releases are retained for 180 days. Forecast &amp; previous values come from the Forex Factory calendar feed; official actuals come from FRED; price reactions are computed from Yahoo Finance 5-minute bars.</p>
 </footer>
 </div>
 <script>{JS}</script>

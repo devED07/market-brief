@@ -9,6 +9,7 @@ from brief.config import load_settings
 def test_dashboard_renders_sparklines_filter_and_safety(tmp_path, monkeypatch):
     monkeypatch.setattr(M, "DASHBOARD_FILE", tmp_path / "dashboard.html")
     monkeypatch.setattr(M, "HISTORY_PAGE_FILE", tmp_path / "history.html")
+    monkeypatch.setattr(M, "LEVELS_PAGE_FILE", tmp_path / "levels.html")
     settings = load_settings()
     brief, html = M.run_cycle(settings, demo=True, memory={})
 

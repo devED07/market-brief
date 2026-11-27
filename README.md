@@ -12,7 +12,7 @@ Each update it:
 
 It runs for free on GitHub, so your computer doesn't need to be on.
 
-**Dashboard:** `https://<your-username>.github.io/market-brief/` (plus `history.html` for archived releases and 5-day PDH/PDL levels, linked from the top bar)
+**Dashboard:** `https://<your-username>.github.io/market-brief/` (plus `levels.html` for live session key levels & 5-day PDH/PDL and `history.html` for archived releases, linked from the top bar)
 
 ---
 
@@ -169,7 +169,8 @@ This is a practical summary, not legal advice.
 | `brief/news.py` | headline searches, negation rules, and keyword lists |
 | `brief/geo.py` | GDELT conflict scoring and 30-day baseline |
 | `brief/dashboard.py` | how the live page looks |
-| `brief/history_page.py` | the `history.html` archive & 5-day PDH/PDL page |
+| `brief/levels_page.py` | the `levels.html` live session key levels & 5-day PDH/PDL page |
+| `brief/history_page.py` | the `history.html` 180-day archived release history page |
 | `scripts/backtest.py` | replay live bias drivers against historical hourly Yahoo Finance data |
 
 To preview layout changes on your PC with made-up data, run:

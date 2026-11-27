@@ -79,6 +79,13 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
     assert "Asia (Tokyo)" in html
     assert "London Session" in html
     assert "New York Session" in html
+    first_card = html[html.index('<article class="day-card'):html.index('</article>')]
+    assert (
+        first_card.index("Asia (Tokyo)")
+        < first_card.index("London Session")
+        < first_card.index("New York Session")
+        < first_card.index("Full Day")
+    )
     assert "18:00–03:00 ET" not in html
     # In Asia/Manila (November EST = 13h behind NY): Asia 8am-2pm, London 4pm-12:30am, NY 9pm-6am
     assert "8:00 AM–2:00 PM" in html
@@ -90,6 +97,74 @@ def test_levels_page_renders_tabs_and_3page_nav(tmp_path, monkeypatch):
     brief["hosted"] = True
     hosted_html = LVL.render(brief)
     assert 'href="index.html"' in hosted_html
+
+
+def test_levels_page_session_status_badges_in_manila_time():
+    from zoneinfo import ZoneInfo
+
+    ph = ZoneInfo("Asia/Manila")
+    today_row = {
+        "date": "2026-11-27",
+        "label": "Fri, Nov 27",
+        "full_label": "Friday, Nov 27",
+        "is_today": True,
+        "open": 3650.0,
+        "high": 3671.7,
+        "high_t": "2026-11-27T14:50:00+00:00",
+        "low": 3646.3,
+        "low_t": "2026-11-27T16:15:00+00:00",
+        "close": 3659.8,
+        "chg_pct": 0.27,
+        "range_pct": 0.70,
+        "asia_h": None,
+        "asia_h_t": "",
+        "asia_l": None,
+        "asia_l_t": "",
+        "london_h": 3671.7,
+        "london_h_t": "2026-11-27T14:50:00+00:00",
+        "london_l": 3646.3,
+        "london_l_t": "2026-11-27T16:15:00+00:00",
+        "ny_h": 3671.7,
+        "ny_h_t": "2026-11-27T14:50:00+00:00",
+        "ny_l": 3646.3,
+        "ny_l_t": "2026-11-27T16:15:00+00:00",
+    }
+
+    def _box_chunk(html_doc: str, start_lbl: str, end_lbl: str | None) -> str:
+        s = html_doc.index(start_lbl)
+        e = html_doc.index(end_lbl, s) if end_lbl else html_doc.index("</div>\n  <div class=\"rangebar-wrap\"", s)
+        return html_doc[s:e]
+
+    brief = {
+        "tz": ph,
+        "now": datetime(2026, 11, 28, 1, 15, tzinfo=ph),
+        "symbols": {"gold": "GC=F", "us30": "YM=F", "us100": "NQ=F"},
+        "snaps": {
+            "gold": {
+                "last": 3659.8,
+                "today_levels": today_row,
+                "levels_5d": [],
+                "session_levels": {},
+                "range_used": 0.5,
+            }
+        },
+        "problems": [],
+        "hosted": False,
+    }
+    html_night = LVL.render(brief)
+    gold_night = html_night[html_night.index('id="lvl-gold"'):html_night.index('id="lvl-us30"')]
+    assert "Closed" in _box_chunk(gold_night, "Asia (Tokyo)", "London Session")
+    assert "Closed" in _box_chunk(gold_night, "London Session", "New York Session")
+    assert "Forming" in _box_chunk(gold_night, "New York Session", "Full Day")
+    assert "Forming" in _box_chunk(gold_night, "Full Day", None)
+
+    brief["now"] = datetime(2026, 11, 27, 11, 0, tzinfo=ph)
+    html_morning = LVL.render(brief)
+    gold_morning = html_morning[html_morning.index('id="lvl-gold"'):html_morning.index('id="lvl-us30"')]
+    assert "Forming" in _box_chunk(gold_morning, "Asia (Tokyo)", "London Session")
+    assert "Upcoming" in _box_chunk(gold_morning, "London Session", "New York Session")
+    assert "Upcoming" in _box_chunk(gold_morning, "New York Session", "Full Day")
+    assert "Forming" in _box_chunk(gold_morning, "Full Day", None)
 
 
 def test_publish_pushes_levels_and_history_to_gh_pages(tmp_path, monkeypatch):

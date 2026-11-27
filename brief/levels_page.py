@@ -46,9 +46,14 @@ EXTRA_CSS = """
 
 .sess-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
 .sbox{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:10px 12px}
-.sbox-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.sbox.forming{border-color:color-mix(in srgb,var(--event) 50%,var(--line))}
+.sbox-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:8px;flex-wrap:wrap}
 .sbox-name{font-weight:700;font-size:13px}
 .sbox-time{color:var(--faint);font-size:11.5px}
+.sstate{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:1px}
+.sstate.forming{color:var(--event);background:color-mix(in srgb,var(--event) 16%,var(--panel));border:1px solid color-mix(in srgb,var(--event) 50%,transparent)}
+.sstate.closed{color:var(--muted);background:var(--panel);border:1px solid var(--line)}
+.sstate.upcoming{color:var(--faint);border:1px dashed var(--line)}
 .sbox.asia .sbox-name{color:var(--gold)}
 .sbox.london .sbox-name{color:var(--us30)}
 .sbox.ny .sbox-name{color:var(--event)}
@@ -166,20 +171,44 @@ def _range_bar(key: str, row: dict, last: float | None) -> str:
     )
 
 
-def _session_window(day_str: str, tzname: str, oh: int, om: int, ch: int, cm: int,
-                    local_tz, prev_day_open: bool = False) -> str:
+def _session_bounds(day_str: str, tzname: str, oh: int, om: int, ch: int, cm: int,
+                    prev_day_open: bool = False) -> tuple[datetime, datetime] | None:
     try:
         d = date.fromisoformat(day_str)
     except Exception:
-        return ""
+        return None
     tz = ZoneInfo(tzname)
     od = (d - timedelta(days=1)) if prev_day_open else d
     o = datetime(od.year, od.month, od.day, oh, om, tzinfo=tz)
     c = datetime(d.year, d.month, d.day, ch, cm, tzinfo=tz)
+    return o, c
+
+
+def _fmt_window(bounds: tuple[datetime, datetime] | None, local_tz) -> str:
+    if bounds is None:
+        return ""
+    o, c = bounds
     return f"{_t(o, local_tz)}–{_t(c, local_tz)}"
 
 
-def _day_card(key: str, row: dict, last: float | None, tz, is_pdh: bool = False) -> str:
+def _session_state(bounds: tuple[datetime, datetime] | None, now: datetime) -> str:
+    if bounds is None:
+        return ""
+    o, c = bounds
+    if now < o:
+        return "upcoming"
+    if now < c:
+        return "forming"
+    return "closed"
+
+
+def _state_badge(state: str) -> str:
+    labels = {"closed": "Closed", "forming": "Forming", "upcoming": "Upcoming"}
+    label = labels.get(state)
+    return f'<span class="sstate {state}">{label}</span>' if label else ""
+
+
+def _day_card(key: str, row: dict, last: float | None, tz, now: datetime, is_pdh: bool = False) -> str:
     is_today = bool(row.get("is_today"))
     card_cls = "day-card today" if is_today else ("day-card pdh-card" if is_pdh else "day-card")
     badge = (
@@ -206,33 +235,31 @@ def _day_card(key: str, row: dict, last: float | None, tz, is_pdh: bool = False)
     full_lo_lbl = "PDL" if is_pdh else "Day Low"
     close_lbl = "Last" if is_today else "Close"
     day_str = row.get("date", "")
-    full_win = _session_window(day_str, "America/New_York", 18, 0, 17, 0, tz, prev_day_open=True)
-    asia_win = _session_window(day_str, "Asia/Tokyo", 9, 0, 15, 0, tz)
-    lon_win = _session_window(day_str, "Europe/London", 8, 0, 16, 30, tz)
-    ny_win = _session_window(day_str, "America/New_York", 8, 0, 17, 0, tz)
+    sessions = [
+        ("sbox asia", "Asia (Tokyo)", _session_bounds(day_str, "Asia/Tokyo", 9, 0, 15, 0),
+         "High", row.get("asia_h"), row.get("asia_h_t", ""), "Low", row.get("asia_l"), row.get("asia_l_t", "")),
+        ("sbox london", "London Session", _session_bounds(day_str, "Europe/London", 8, 0, 16, 30),
+         "High", row.get("london_h"), row.get("london_h_t", ""), "Low", row.get("london_l"), row.get("london_l_t", "")),
+        ("sbox ny", "New York Session", _session_bounds(day_str, "America/New_York", 8, 0, 17, 0),
+         "High", row.get("ny_h"), row.get("ny_h_t", ""), "Low", row.get("ny_l"), row.get("ny_l_t", "")),
+        ("sbox", "Full Day", _session_bounds(day_str, "America/New_York", 18, 0, 17, 0, prev_day_open=True),
+         full_hi_lbl, hi, row.get("high_t", ""), full_lo_lbl, lo, row.get("low_t", "")),
+    ]
 
-    boxes = "".join([
-        f'<div class="sbox">'
-        f'<div class="sbox-head"><span class="sbox-name">Full Day</span><span class="sbox-time">{escape(full_win)}</span></div>'
-        f'{_level_line(key, full_hi_lbl, hi, row.get("high_t", ""), last, tz)}'
-        f'{_level_line(key, full_lo_lbl, lo, row.get("low_t", ""), last, tz)}'
-        f'</div>',
-        f'<div class="sbox asia">'
-        f'<div class="sbox-head"><span class="sbox-name">Asia (Tokyo)</span><span class="sbox-time">{escape(asia_win)}</span></div>'
-        f'{_level_line(key, "High", row.get("asia_h"), row.get("asia_h_t", ""), last, tz)}'
-        f'{_level_line(key, "Low", row.get("asia_l"), row.get("asia_l_t", ""), last, tz)}'
-        f'</div>',
-        f'<div class="sbox london">'
-        f'<div class="sbox-head"><span class="sbox-name">London Session</span><span class="sbox-time">{escape(lon_win)}</span></div>'
-        f'{_level_line(key, "High", row.get("london_h"), row.get("london_h_t", ""), last, tz)}'
-        f'{_level_line(key, "Low", row.get("london_l"), row.get("london_l_t", ""), last, tz)}'
-        f'</div>',
-        f'<div class="sbox ny">'
-        f'<div class="sbox-head"><span class="sbox-name">New York Session</span><span class="sbox-time">{escape(ny_win)}</span></div>'
-        f'{_level_line(key, "High", row.get("ny_h"), row.get("ny_h_t", ""), last, tz)}'
-        f'{_level_line(key, "Low", row.get("ny_l"), row.get("ny_l_t", ""), last, tz)}'
-        f'</div>',
-    ])
+    box_html = []
+    for base_cls, name, bounds, h_lbl, h_val, h_t, l_lbl, l_val, l_t in sessions:
+        st = _session_state(bounds, now) if is_today else ""
+        cls = f"{base_cls} forming" if st == "forming" else base_cls
+        win = _fmt_window(bounds, tz)
+        box_html.append(
+            f'<div class="{cls}">'
+            f'<div class="sbox-head"><span class="sbox-name">{escape(name)}{_state_badge(st)}</span>'
+            f'<span class="sbox-time">{escape(win)}</span></div>'
+            f'{_level_line(key, h_lbl, h_val, h_t, last, tz)}'
+            f'{_level_line(key, l_lbl, l_val, l_t, last, tz)}'
+            f'</div>'
+        )
+    boxes = "".join(box_html)
 
     title = row.get("full_label") or row.get("label") or row.get("date", "")
     return f"""
@@ -261,7 +288,7 @@ def _ref_card(label: str, val_txt: str, sub_html: str) -> str:
     )
 
 
-def _asset_pane(key: str, snap: dict, tz) -> str:
+def _asset_pane(key: str, snap: dict, tz, now: datetime) -> str:
     last = snap.get("last")
     sl = snap.get("session_levels") or {}
     ru = snap.get("range_used")
@@ -281,9 +308,9 @@ def _asset_pane(key: str, snap: dict, tz) -> str:
     cards = []
     today = snap.get("today_levels")
     if today:
-        cards.append(_day_card(key, today, last, tz, is_pdh=False))
+        cards.append(_day_card(key, today, last, tz, now, is_pdh=False))
     for idx, row in enumerate(snap.get("levels_5d") or []):
-        cards.append(_day_card(key, row, last, tz, is_pdh=(idx == 0)))
+        cards.append(_day_card(key, row, last, tz, now, is_pdh=(idx == 0)))
 
     if not cards:
         return strip + '<div class="panel"><p class="empty">Not enough intraday bars yet to build session levels.</p></div>'
@@ -310,12 +337,13 @@ def render(brief: dict) -> str:
             f'<button type="button" class="tab {key}{active}" data-tab="{key}">'
             f'{escape(name)}<span>{escape(syms.get(key, ""))} · {last_txt}</span></button>'
         )
-        panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{_asset_pane(key, snap, tz)}</div>')
+        panes.append(f'<div class="lvl-pane{active}" id="lvl-{key}">{_asset_pane(key, snap, tz, now)}</div>')
 
     today_str = now.astimezone(tz).strftime("%Y-%m-%d")
-    asia_sub = _session_window(today_str, "Asia/Tokyo", 9, 0, 15, 0, tz)
-    lon_sub = _session_window(today_str, "Europe/London", 8, 0, 16, 30, tz)
-    ny_sub = _session_window(today_str, "America/New_York", 8, 0, 17, 0, tz)
+    asia_sub = _fmt_window(_session_bounds(today_str, "Asia/Tokyo", 9, 0, 15, 0), tz)
+    lon_sub = _fmt_window(_session_bounds(today_str, "Europe/London", 8, 0, 16, 30), tz)
+    ny_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 8, 0, 17, 0), tz)
+    full_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 18, 0, 17, 0, prev_day_open=True), tz)
 
     return f"""<!doctype html>
 <html lang="en"><head>
@@ -342,7 +370,7 @@ def render(brief: dict) -> str:
 
 <section aria-labelledby="lvl-main-h">
   <h2 id="lvl-main-h">Day-by-day session key levels</h2>
-  <p class="sub">Each trading day's Full Day (PDH/PDL), Asia ({escape(asia_sub)}), London ({escape(lon_sub)}), and New York ({escape(ny_sub)}) highs and lows in your time zone, with the exact time each level was set. Bar colors: gold = Asia, blue = London, purple = New York, white pin = current price.</p>
+  <p class="sub">Ordered chronologically in your time zone: Asia ({escape(asia_sub)}) → London ({escape(lon_sub)}) → New York ({escape(ny_sub)}) → Full Day ({escape(full_sub)}), with exact level timestamps and live Closed / Forming / Upcoming states. Bar colors: gold = Asia, blue = London, purple = New York, white pin = current price.</p>
   <div class="tabs" role="tablist">{''.join(tabs)}</div>
   {''.join(panes)}
 </section>

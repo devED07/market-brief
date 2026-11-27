@@ -2,13 +2,11 @@
 Everything here is fake and clearly labelled as such on the page."""
 
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
-NY = ZoneInfo("America/New_York")
-
+from .util import NEW_YORK as NY
 
 # Made-up actual numbers and gasoline trend, standing in for FRED.
 ACTUALS = {
@@ -38,6 +36,32 @@ def _open(ts: pd.Timestamp) -> bool:
     if wd == 5 or (wd == 4 and h >= 17) or (wd == 6 and h < 18):
         return False
     return h != 17
+
+
+def demo_history(now: datetime, bias: dict) -> list[dict]:
+    """24h synthetic score trajectory ending at the current demo bias."""
+    g_end = bias["gold"]["score"]
+    u_end = bias["us30"]["score"]
+    n_end = bias["us100"]["score"]
+    offsets = [
+        (-22, +1.8, +2.0, +2.4),
+        (-18, +1.4, +1.5, +1.9),
+        (-14, +0.9, +1.1, +1.3),
+        (-10, +0.5, +0.7, +0.9),
+        (-6,  +0.3, +0.4, +0.5),
+        (-3,  +0.1, +0.2, +0.2),
+        (0,    0.0,  0.0,  0.0),
+    ]
+    rows = []
+    for h_off, dg, du, dn in offsets:
+        t = int((now + timedelta(hours=h_off)).timestamp() * 1000)
+        rows.append({
+            "t": t,
+            "gold": round(max(-10.0, min(10.0, g_end + dg)), 2),
+            "us30": round(max(-10.0, min(10.0, u_end + du)), 2),
+            "us100": round(max(-10.0, min(10.0, n_end + dn)), 2),
+        })
+    return rows
 
 
 def build():
@@ -98,17 +122,17 @@ def build():
         series[key] = pd.Series(vals, index=idx)
 
     hl_raw = [
-        (25, "Gold slips as Treasury yields climb ahead of CPI", ["hawkish"]),
-        (48, "Fed's official says no rush to cut rates with inflation sticky", ["hawkish"]),
-        (95, "Dollar gains for a third day as traders trim rate-cut bets", ["hawkish"]),
-        (140, "Stocks slide as investors brace for inflation data", ["risk-off"]),
-        (210, "Oil steadies; Middle East tensions ease after talks", ["risk-on"]),
-        (260, "New tariff threat rattles Asian markets", ["risk-off"]),
-        (330, "Central bank gold buying stays strong, survey shows", []),
-        (400, "Analysts split on whether CPI will cool further", []),
-        (470, "Dow futures edge lower; earnings season winds down", []),
-        (560, "Missile strike reported near border, safe-haven demand picks up", ["risk-off"]),
+        (25, "Gold slips as Treasury yields climb ahead of CPI"),
+        (48, "Fed's official says no rush to cut rates with sticky inflation"),
+        (95, "Dollar gains for a third day as traders trim rate-cut bets"),
+        (140, "Stocks slide as investors brace for inflation data"),
+        (210, "Nasdaq gains as Middle East tensions ease after talks"),
+        (260, "New tariff threat rattles Asian markets"),
+        (330, "Central bank gold buying stays strong, survey shows"),
+        (400, "Analysts split on whether CPI will cool further"),
+        (470, "Dow futures edge lower; earnings season winds down"),
+        (560, "Missile strike reported near border, safe-haven demand picks up"),
     ]
-    headlines = [{"title": t, "source": "Sample source", "link": "#", "time": now - timedelta(minutes=m), "tags": tags}
-                 for m, t, tags in hl_raw]
+    headlines = [{"title": t, "source": "Sample source", "link": "", "time": now - timedelta(minutes=m)}
+                 for m, t in hl_raw]
     return now, rows, series, headlines

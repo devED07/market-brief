@@ -4,7 +4,12 @@ import json
 from datetime import datetime, timedelta
 from html import escape
 
+from .bias import YAHOO_DELAY_MIN, clamp
 from .prices import LABELS
+from .util import fmt_time, short_title
+
+_t = fmt_time
+_short = short_title
 
 CSS = """
 :root{
@@ -53,12 +58,15 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
 .verdict{font-weight:800;font-stretch:68%;font-size:clamp(32px,3.5vw,44px);line-height:1;margin:14px 0 6px;letter-spacing:-.005em}
 .tone-bull{color:var(--bull)} .tone-bear{color:var(--bear)} .tone-flat{color:var(--flat)}
 .scoreline{display:flex;align-items:center;gap:12px;margin:12px 0 4px}
-.scorenum{font-weight:700;font-size:15px;min-width:74px}
+.scorenum{font-weight:700;font-size:15px;min-width:74px;white-space:nowrap}
+.capped{font-size:11px;color:var(--faint)}
 .scale{position:relative;flex:1;height:10px;background:var(--panel-2);border-radius:5px}
 .scale .mid{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--faint)}
 .scale .fill{position:absolute;top:0;bottom:0;border-radius:5px}
 .scale .pin{position:absolute;top:-4px;width:3px;height:18px;border-radius:2px;background:var(--text);transform:translateX(-1px)}
 .scale-ends{display:flex;justify-content:space-between;color:var(--faint);font-size:12px;margin-left:86px}
+.sparkwrap{display:flex;align-items:center;gap:10px;margin:8px 0 2px;color:var(--faint);font-size:12px}
+.spark{width:130px;height:26px;flex:0 0 auto;overflow:visible}
 .agree{color:var(--muted);font-size:13px;margin:8px 0 12px}
 .warn{margin:0 0 12px;padding:9px 12px;border-radius:5px;font-size:13px;line-height:1.45;
   border:1px solid color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
@@ -78,15 +86,20 @@ h2{font-size:17px;font-weight:700;margin:0 0 4px}
 .sub{color:var(--muted);font-size:13px;margin:0 0 12px}
 .strip{background:var(--panel);border-radius:6px;padding:14px 16px 10px}
 .lane{display:grid;grid-template-columns:86px 1fr;align-items:center;min-height:26px}
+.lane.tall{min-height:38px}
 .lane-name{color:var(--muted);font-size:13px}
 .track{position:relative;height:26px}
+.lane.tall .track{height:38px}
 .track .seg{position:absolute;top:6px;height:14px;border-radius:3px;background:var(--panel-2);
   border:1px solid var(--line)}
 .track .seg.us30{background:color-mix(in srgb,var(--us30) 35%,var(--panel-2));border-color:color-mix(in srgb,var(--us30) 60%,transparent)}
 .track .seg.overlap{background:color-mix(in srgb,var(--gold) 30%,var(--panel-2));border-color:color-mix(in srgb,var(--gold) 55%,transparent)}
 .track .rel{position:absolute;top:2px;width:3px;height:22px;border-radius:2px;background:var(--event);transform:translateX(-1px)}
+.lane.tall .track .rel{height:32px}
 .track .rel.med{opacity:.5}
-.track .rel-label{position:absolute;top:4px;font-size:12px;color:var(--event);white-space:nowrap;padding-left:7px}
+.track .rel-label{position:absolute;top:2px;font-size:12px;color:var(--event);white-space:nowrap;padding-left:7px}
+.track .rel-label.flip{transform:translateX(-100%);padding-left:0;padding-right:7px}
+.track .rel-label.stagger{top:18px}
 .axis{position:relative;height:18px;margin-left:86px;color:var(--faint);font-size:12px}
 .axis span{position:absolute;transform:translateX(-50%)}
 .nowline{position:absolute;top:0;bottom:0;width:2px;background:var(--text);opacity:.85}
@@ -143,6 +156,15 @@ table.mk td:first-child{text-align:left}
 .note{color:var(--faint);font-size:12px;margin-top:10px}
 
 /* headlines */
+.sec-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.sec-head .sub{margin-bottom:0}
+.hl-filter{display:flex;gap:6px}
+.fbtn{background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:5px;
+  padding:4px 10px;font-size:12.5px;font-family:inherit;cursor:pointer}
+.fbtn.active{background:var(--panel-2);color:var(--text);border-color:var(--event)}
+.only-tagged .hl.untagged{display:none}
+.hl-empty-tagged{display:none;color:var(--muted);padding:8px 0}
+.only-tagged .hl-empty-tagged.show{display:block}
 .hl{display:grid;grid-template-columns:62px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
 .hl:first-of-type{border-top:0}
 .hl-time{color:var(--muted);font-size:13px}
@@ -215,6 +237,16 @@ JS = """
   }
   tick(); setInterval(tick, 1000);
 
+  // Headlines filter (All / Tagged only)
+  var hlPanel = document.getElementById("hl-panel");
+  document.querySelectorAll("[data-hl]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      var mode = btn.getAttribute("data-hl");
+      document.querySelectorAll("[data-hl]").forEach(function(b){ b.classList.toggle("active", b === btn); });
+      if (hlPanel) hlPanel.classList.toggle("only-tagged", mode === "tagged");
+    });
+  });
+
   // How old is this page? Flag it if updates have stopped arriving.
   function fmtAgo(ms){
     var m = Math.floor(ms/60000);
@@ -235,8 +267,11 @@ JS = """
   }
   freshness(); setInterval(freshness, 30000);
 
-  // Load the new version when it's ready, keeping your scroll position.
-  try { var y = sessionStorage.getItem("briefScroll"); if (y) window.scrollTo(0, parseInt(y,10)); } catch(e){}
+  // Load the new version when it's ready, keeping your scroll position once.
+  try {
+    var y = sessionStorage.getItem("briefScroll");
+    if (y){ sessionStorage.removeItem("briefScroll"); window.scrollTo(0, parseInt(y,10)); }
+  } catch(e){}
   function reload(fresh){
     try { sessionStorage.setItem("briefScroll", String(window.scrollY)); } catch(e){}
     if (fresh) location.replace(location.pathname + "?v=" + Date.now()); else location.reload();
@@ -249,18 +284,13 @@ JS = """
     }, 120000);
   } else {
     var wait = Math.max(30000, cfg.nextUpdate + 90000 - nowMs());
-    setTimeout(function(){ reload(false); }, Math.min(wait, 10*60*1000));
+    setTimeout(function(){ reload(false); }, Math.min(wait, 35*60*1000));
   }
 })();
 """
 
 
 # ------------------------------------------------------------------ helpers
-
-def _t(dt: datetime, tz, fmt: str = "%I:%M %p") -> str:
-    s = dt.astimezone(tz).strftime(fmt)
-    return s.lstrip("0") if fmt.startswith("%I") else s
-
 
 def _num(key: str, v: float | None) -> str:
     if v is None:
@@ -272,7 +302,7 @@ def _num(key: str, v: float | None) -> str:
     return f"{v:,.2f}"
 
 
-def _chg(v: float | None, invert: bool = False) -> str:
+def _chg(v: float | None) -> str:
     if v is None:
         return '<span class="na">n/a</span>'
     cls = "up" if v > 0.005 else "down" if v < -0.005 else "na"
@@ -292,13 +322,52 @@ def _bar_html(points: float, span: float) -> str:
     return f'<div class="minibar"><i style="left:{left:.1f}%;width:{w:.1f}%;background:{color}"></i></div>'
 
 
+def _sparkline(key: str, history: list[dict], now: datetime) -> str:
+    """Compact inline SVG sparkline of the bias score over the last 24-48h."""
+    if not history:
+        return ""
+    cutoff_24h = int((now - timedelta(hours=24)).timestamp() * 1000)
+    pts_all = sorted((int(h["t"]), float(h[key])) for h in history if key in h and h[key] is not None)
+    pts_24 = [p for p in pts_all if p[0] >= cutoff_24h]
+    pts = pts_24 if len(pts_24) >= 2 else pts_all
+    if len(pts) < 2:
+        return ""
+
+    t0, t1 = pts[0][0], pts[-1][0]
+    span_ms = max(1, t1 - t0)
+    coords = []
+    for idx, (t, val) in enumerate(pts):
+        x = 3.0 + (idx / (len(pts) - 1) * 194.0 if t1 == t0 else (t - t0) / span_ms * 194.0)
+        y = 14.0 - (clamp(val, -10.0, 10.0) / 10.0) * 11.0
+        coords.append((x, y))
+    poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    lx, ly = coords[-1]
+    last_val = pts[-1][1]
+    dot_c = "var(--bull)" if last_val >= 1.5 else "var(--bear)" if last_val <= -1.5 else "var(--flat)"
+    delta = last_val - pts[0][1]
+    span_h = max(1, round(span_ms / 3600000))
+    label = f"{span_h}h bias trend: {_signed(delta)}"
+    return (
+        f'<div class="sparkwrap">'
+        f'<svg class="spark" viewBox="0 0 200 28" role="img" aria-label="{escape(label)}">'
+        f'<line x1="0" y1="14" x2="200" y2="14" stroke="var(--line)" stroke-dasharray="2 3"/>'
+        f'<polyline fill="none" stroke="var(--c)" stroke-width="2" stroke-linejoin="round" '
+        f'stroke-linecap="round" points="{poly}"/>'
+        f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="3" fill="{dot_c}"/>'
+        f'</svg><span>{escape(label)}</span></div>'
+    )
+
+
 # ------------------------------------------------------------------ sections
 
-def _instrument(key: str, name: str, symbol: str, data: dict) -> str:
+def _instrument(key: str, name: str, symbol: str, data: dict,
+                history: list[dict] | None = None, now: datetime | None = None) -> str:
     score = data["score"]
     pos = (score + 10) / 20 * 100
     left, width = (50, pos - 50) if score >= 0 else (pos, 50 - pos)
     fill_color = {"bull": "var(--bull)", "bear": "var(--bear)", "flat": "var(--flat)"}[data["tone"]]
+    capped_tag = ' <small class="capped">(capped)</small>' if data.get("clamped") else ""
+    spark = _sparkline(key, history or [], now) if now else ""
     rows = []
     for d in data["drivers"]:
         rows.append(
@@ -306,17 +375,18 @@ def _instrument(key: str, name: str, symbol: str, data: dict) -> str:
             f'<td class="db">{_bar_html(d["points"], 4)}</td><td class="dp">{_signed(d["points"])}</td></tr>'
         )
     return f"""
-<article class="inst {key}" aria-label="{name} bias">
-  <div class="inst-head"><span class="inst-name">{name}</span><span class="inst-sym">{escape(symbol)}</span></div>
+<article class="inst {key}" aria-label="{escape(name)} bias">
+  <div class="inst-head"><span class="inst-name">{escape(name)}</span><span class="inst-sym">{escape(symbol)}</span></div>
   <div class="verdict tone-{data['tone']}">{escape(data['label'])}</div>
   <div class="scoreline">
-    <span class="scorenum">{_signed(score)} <span style="color:var(--faint);font-weight:400">/ 10</span></span>
+    <span class="scorenum">{_signed(score)} <span style="color:var(--faint);font-weight:400">/ 10{capped_tag}</span></span>
     <div class="scale" role="img" aria-label="Score {score:.1f} on a scale from minus 10 to plus 10">
       <span class="fill" style="left:{left:.1f}%;width:{width:.1f}%;background:{fill_color};opacity:.55"></span>
       <span class="mid"></span><span class="pin" style="left:{pos:.1f}%"></span>
     </div>
   </div>
   <div class="scale-ends"><span>Bearish</span><span>Bullish</span></div>
+  {spark}
   <div class="agree">{escape(data['agreement'])}</div>
   {f'<p class="warn" role="note">{escape(data["warning"])}</p>' if data.get("warning") else ""}
   <table class="drivers">{''.join(rows)}</table>
@@ -330,16 +400,21 @@ def _banners(brief: dict, tz, now: datetime) -> str:
                    '<span>Everything below is made up to show the layout. Start the app normally for live data.</span></div>')
     mkt = brief["market"]
     if not mkt["open"]:
-        when = _t(mkt["reopen"], tz, "%A %I:%M %p").replace(" 0", " ")
-        what = "for the weekend" if mkt["reason"] == "weekend" else "for the daily one-hour break"
+        when = _t(mkt["reopen"], tz, "%A %I:%M %p")
+        if mkt["reason"] == "weekend":
+            what = "for the weekend"
+        elif mkt["reason"] == "holiday":
+            what = f'for {escape(mkt.get("holiday_name") or "a market holiday")}'
+        else:
+            what = "for the daily one-hour break"
         out.append(f'<div class="banner closed"><strong>Gold, US30 and US100 futures are closed {what}.</strong>'
-                   f'<span>They reopen {when} your time. Changes shown are from the last session.</span></div>')
+                   f'<span>They reopen {escape(when)} your time. Changes shown are from the last session.</span></div>')
 
     for rel in brief["releases"]:
         if rel["impact"] != "High":
             continue
         if rel["status"] == "waiting":
-            ready = rel["time"] + timedelta(minutes=rel["window_min"] + 13)
+            ready = rel["time"] + timedelta(minutes=rel["window_min"] + YAHOO_DELAY_MIN + 1)
             out.append(f'<div class="banner event"><strong>{escape(rel["headline"])} just came out.</strong>'
                        f'<span>The first 15 to 30 minutes are often noisy and can reverse. '
                        f'The reaction gets scored at about {_t(ready, tz)}.</span></div>')
@@ -368,39 +443,66 @@ def _night(brief: dict, tz) -> str:
         return max(0.0, min(100.0, (dt - start).total_seconds() / span * 100))
 
     lanes = []
-    # Releases lane
+    # Releases lane with flip for right-edge labels (e.g. FOMC) and stagger for nearby labels
     marks = []
+    high_rels = []
     for rel in brief["releases"]:
         if start <= rel["time"] < end and not rel.get("all_day") and not rel.get("lead_only"):
             p = pct(rel["time"])
             cls = "rel" if rel["impact"] == "High" else "rel med"
             title = f'{_t(rel["time"], tz)} {rel["headline"]}'
             marks.append(f'<span class="{cls}" style="left:{p:.2f}%" title="{escape(title)}"></span>')
-            if rel["impact"] == "High" and p < 80:
-                marks.append(f'<span class="rel-label" style="left:{p:.2f}%">{_t(rel["time"], tz)} '
-                             f'{escape(_short(rel["headline"]))}</span>')
-    lanes.append(f'<div class="lane"><span class="lane-name">US data</span><div class="track">{"".join(marks)}</div></div>')
+            if rel["impact"] == "High":
+                high_rels.append((p, rel))
+
+    high_rels.sort(key=lambda x: x[0])
+    staggered = False
+    prev_p = -100.0
+    prev_row = 0
+    for p, rel in high_rels:
+        row = 1 - prev_row if (p - prev_p < 14.0) else 0
+        if row == 1:
+            staggered = True
+        cls = "rel-label"
+        if p >= 72.0:
+            cls += " flip"
+        if row == 1:
+            cls += " stagger"
+        marks.append(
+            f'<span class="{cls}" style="left:{p:.2f}%">{_t(rel["time"], tz)} '
+            f'{escape(_short(rel["headline"]))}</span>'
+        )
+        prev_p, prev_row = p, row
+
+    lane_cls = "lane tall" if staggered else "lane"
+    lanes.append(f'<div class="{lane_cls}"><span class="lane-name">US data</span><div class="track">{"".join(marks)}</div></div>')
 
     sess = {s["name"]: s for s in night["sessions"]}
-    overlap = None
-    if "London" in sess and "New York" in sess:
-        o = max(sess["London"]["open"], sess["New York"]["open"])
-        c = min(sess["London"]["close"], sess["New York"]["close"])
-        if c > o:
-            overlap = (o, c)
+    lon_segs = sess["London"].get("segments", [(sess["London"]["open"], sess["London"]["close"])]) if "London" in sess else []
+    ny_segs = sess["New York"].get("segments", [(sess["New York"]["open"], sess["New York"]["close"])]) if "New York" in sess else []
+    overlaps = []
+    for lo, lc in lon_segs:
+        for no, nc in ny_segs:
+            o, c = max(lo, no), min(lc, nc)
+            if c > o:
+                overlaps.append((o, c))
+
     for name in ("Tokyo", "London", "New York", "US30 cash"):
         segs = []
         s = sess.get(name)
         if s:
-            l, r = pct(s["open"]), pct(s["close"])
+            s_list = s.get("segments") or [(s["open"], s["close"])]
             cls = "seg us30" if name == "US30 cash" else "seg"
-            label = f'{name}: {_t(s["open"], tz)} to {_t(s["close"], tz)}'
-            segs.append(f'<span class="{cls}" style="left:{l:.2f}%;width:{r - l:.2f}%" title="{escape(label)}"></span>')
-            if name == "New York" and overlap:
-                ol, orr = pct(overlap[0]), pct(overlap[1])
-                segs.append(f'<span class="seg overlap" style="left:{ol:.2f}%;width:{orr - ol:.2f}%" '
-                            f'title="London and New York overlap"></span>')
-        lanes.append(f'<div class="lane"><span class="lane-name">{name}</span><div class="track">{"".join(segs)}</div></div>')
+            for so, sc in s_list:
+                l, r = pct(so), pct(sc)
+                label = f'{name}: {_t(so, tz)} to {_t(sc, tz)}'
+                segs.append(f'<span class="{cls}" style="left:{l:.2f}%;width:{r - l:.2f}%" title="{escape(label)}"></span>')
+            if name == "New York":
+                for oo, oc in overlaps:
+                    ol, orr = pct(oo), pct(oc)
+                    segs.append(f'<span class="seg overlap" style="left:{ol:.2f}%;width:{orr - ol:.2f}%" '
+                                f'title="London and New York overlap"></span>')
+        lanes.append(f'<div class="lane"><span class="lane-name">{escape(name)}</span><div class="track">{"".join(segs)}</div></div>')
 
     ticks = []
     for h in range(0, 25, 3):
@@ -409,8 +511,9 @@ def _night(brief: dict, tz) -> str:
         ticks.append(f'<span style="left:{h / 24 * 100:.2f}%">{lab}</span>')
 
     sub_bits = []
-    if overlap:
-        sub_bits.append(f"London and New York overlap {_t(overlap[0], tz)} to {_t(overlap[1], tz)} (shaded gold)")
+    if overlaps:
+        o, c = overlaps[0]
+        sub_bits.append(f"London and New York overlap {_t(o, tz)} to {_t(c, tz)} (shaded gold)")
     if "US30 cash" in sess:
         sub_bits.append(f"US30 cash session opens {_t(sess['US30 cash']['open'], tz)}")
     sub = ". ".join(sub_bits) + "." if sub_bits else "No sessions in this window."
@@ -418,7 +521,7 @@ def _night(brief: dict, tz) -> str:
     return f"""
 <section aria-labelledby="night-h">
   <h2 id="night-h">{escape(night["title"])}</h2>
-  <p class="sub">{sub}</p>
+  <p class="sub">{escape(sub)}</p>
   <div class="strip">
     <div class="lanes">{''.join(lanes)}<div class="nowwrap"><span class="nowline" id="nowline" style="display:none"></span></div></div>
     <div class="axis">{''.join(ticks)}</div>
@@ -469,12 +572,12 @@ def _leadups(brief: dict, tz, now: datetime) -> str:
         if read["lean"] is not None and abs(read["lean"]) >= 0.3:
             if read["lean"] > 0:
                 meaning = ("Hot data usually lifts yields and the dollar, which weighs on gold, US30 and US100. "
-                           f"If {t['name']} confirms it, some of that may already be priced in. "
+                           f"If {escape(t['name'])} confirms it, some of that may already be priced in. "
                            "A surprise the other way would likely move price more.")
             else:
                 meaning = ("Soft data usually pulls yields and the dollar down, which helps gold. For US30 and US100 it "
                            "depends on whether the market reads it as rate cuts (good) or a slowdown (bad). "
-                           f"If {t['name']} confirms it, some of that may already be priced in. "
+                           f"If {escape(t['name'])} confirms it, some of that may already be priced in. "
                            "A surprise the other way would likely move price more.")
         meaning_html = f"<p>{meaning}</p>" if meaning else ""
         conf = f'<div class="lead-conf">{escape(read["confidence"])}</div>' if read["confidence"] else '<div class="lead-conf"></div>'
@@ -518,11 +621,6 @@ def _scenarios(target: dict, side: str | None) -> str:
             f'{"".join(rows)}</table>')
 
 
-def _short(title: str) -> str:
-    return (title.replace("Non-Farm Employment Change", "NFP").replace(" m/m", "")
-            .replace(" y/y", "").replace(" q/q", "").replace("Federal Funds Rate", "Fed decision"))
-
-
 def _releases(brief: dict, tz, now: datetime) -> str:
     rels = [r for r in brief["releases"] if r["time"] >= now - timedelta(days=7) and not r.get("lead_only")]
     if not rels:
@@ -531,7 +629,7 @@ def _releases(brief: dict, tz, now: datetime) -> str:
     for r in rels:
         day = r["time"].astimezone(tz).strftime("%A, %b %d").replace(" 0", " ")
         if day != last_day:
-            out.append(f'<div class="day">{day}</div>')
+            out.append(f'<div class="day">{escape(day)}</div>')
             last_day = day
         ev = r["events"][0]
         meta = []
@@ -565,7 +663,7 @@ def _releases(brief: dict, tz, now: datetime) -> str:
         imp = "imp" if r["impact"] == "High" else "imp med"
         out.append(
             f'<div class="rel-row"><span class="rel-time">{"All day" if r["status"] == "all_day" else _t(r["time"], tz)}</span>'
-            f'<div><div class="rel-title"><span class="{imp}" title="{r["impact"]} impact"></span>{escape(r["headline"])}</div>{meta_html}</div>'
+            f'<div><div class="rel-title"><span class="{imp}" title="{escape(r["impact"])} impact"></span>{escape(r["headline"])}</div>{meta_html}</div>'
             f'<div class="rel-out">{right}</div></div>'
         )
     return "".join(out)
@@ -573,23 +671,28 @@ def _releases(brief: dict, tz, now: datetime) -> str:
 
 def _markets(brief: dict, now: datetime) -> str:
     rows = []
+    market_open = brief["market"]["open"]
     for key in ("gold", "us30", "us100", "dollar", "treasury_10y", "vix"):
         s = brief["snaps"].get(key)
         name = LABELS[key]
-        hint = ""
+        hint_txt = ""
         if key == "treasury_10y":
-            hint = '<span class="hint">Falls when yields rise</span>'
+            hint_txt = "Falls when yields rise"
         elif key == "gold":
-            hint = '<span class="hint">Futures, a few dollars above spot</span>'
+            hint_txt = "Futures, a few dollars above spot"
         elif key == "us30":
-            hint = '<span class="hint">Dow futures</span>'
+            hint_txt = "Dow futures"
         elif key == "us100":
-            hint = '<span class="hint">Nasdaq 100 futures</span>'
+            hint_txt = "Nasdaq 100 futures"
+        if s and market_open and s.get("stale_min", 0) >= 120:
+            stale_txt = f"stale {s['stale_min'] // 60}h"
+            hint_txt = f"{hint_txt} ({stale_txt})" if hint_txt else f"Last bar {stale_txt}"
+        hint = f'<span class="hint">{escape(hint_txt)}</span>' if hint_txt else ""
         if not s:
-            rows.append(f'<tr><td><span class="nm">{name}</span>{hint}</td><td colspan="4" class="na">No data</td></tr>')
+            rows.append(f'<tr><td><span class="nm">{escape(name)}</span>{hint}</td><td colspan="4" class="na">No data</td></tr>')
             continue
         rows.append(
-            f'<tr><td><span class="nm">{name}</span>{hint}</td><td>{_num(key, s["last"])}</td>'
+            f'<tr><td><span class="nm">{escape(name)}</span>{hint}</td><td>{_num(key, s["last"])}</td>'
             f'<td>{_chg(s["chg_30m"])}</td><td>{_chg(s["chg_4h"])}</td><td>{_chg(s["chg_24h"])}</td></tr>'
         )
     return f"""<table class="mk">
@@ -603,17 +706,27 @@ def _headlines(brief: dict, tz, now: datetime) -> str:
     if not hls:
         return '<p class="empty">No headlines came through this time. They retry on the next update.</p>'
     out = []
+    has_tagged = False
     for h in hls[:20]:
-        mins = int((now - h["time"]).total_seconds() // 60)
+        mins = max(0, int((now - h["time"]).total_seconds() // 60))
         ago = f"{mins}m ago" if mins < 60 else f"{mins // 60}h ago"
-        tags = "".join(f'<span class="tag {t}">{t}</span>' for t in h.get("tags", []))
-        link = escape(h.get("link") or "#")
+        hl_tags = h.get("tags", [])
+        if hl_tags:
+            has_tagged = True
+        tags = "".join(f'<span class="tag {escape(t)}">{escape(t)}</span>' for t in hl_tags)
+        cls = "hl" if hl_tags else "hl untagged"
+        raw_link = (h.get("link") or "").strip()
+        if raw_link.startswith(("http://", "https://")):
+            title_html = f'<a href="{escape(raw_link, quote=True)}" target="_blank" rel="noopener">{escape(h["title"])}</a>'
+        else:
+            title_html = f'<span>{escape(h["title"])}</span>'
         out.append(
-            f'<div class="hl"><span class="hl-time">{ago}</span><div>'
-            f'<a href="{link}" target="_blank" rel="noopener">{escape(h["title"])}</a>'
+            f'<div class="{cls}"><span class="hl-time">{ago}</span><div>'
+            f'{title_html}'
             f'<span class="hl-src">{escape(h.get("source", ""))}</span>{tags}</div></div>'
         )
-    return "".join(out)
+    empty_tagged = '<p class="hl-empty-tagged show">No tagged headlines in the last 12 hours.</p>' if not has_tagged else '<p class="hl-empty-tagged"></p>'
+    return "".join(out) + empty_tagged
 
 
 # ------------------------------------------------------------------ page
@@ -622,11 +735,13 @@ def render(brief: dict) -> str:
     tz = brief["tz"]
     now = brief["now"]
     syms = brief["symbols"]
+    history = brief.get("history") or []
     stale = bool(brief["problems"])
-    weekend = brief["market"].get("reason") == "weekend"
+    closed_long = brief["market"].get("reason") in ("weekend", "holiday")
+    cadence_min = int(brief.get("cadence_min") or 30)
     if brief.get("hosted"):
-        cadence = "Updates every 3 hours until markets reopen" if weekend else "Updates about every 30 min"
-        stale_after_min = 240 if weekend else 75
+        cadence = "Updates every 3 hours until markets reopen" if closed_long else f"Updates every {cadence_min} min"
+        stale_after_min = 240 if closed_long else max(75, cadence_min * 2 + 15)
     else:
         cadence = f"Next update {_t(brief['next_update'], tz)}"
         stale_after_min = max(75, int((brief["next_update"] - now).total_seconds() // 60) + 45)
@@ -661,16 +776,16 @@ def render(brief: dict) -> str:
   <div class="clock"><b id="clock">{_t(now, tz, "%a, %b %d %I:%M %p")}</b></div>
   <div class="fresh">
     <span><span class="dot{' stale' if stale else ''}" id="dot"></span>Updated {_t(now, tz)}<span id="age"></span></span>
-    <span>{cadence}</span>
+    <span>{escape(cadence)}</span>
   </div>
 </header>
 
 {_banners(brief, tz, now)}
 
 <div class="bias">
-{_instrument("gold", "Gold", syms["gold"], brief["bias"]["gold"])}
-{_instrument("us30", "US30", syms["us30"], brief["bias"]["us30"])}
-{_instrument("us100", "US100", syms["us100"], brief["bias"]["us100"])}
+{_instrument("gold", "Gold", syms["gold"], brief["bias"]["gold"], history, now)}
+{_instrument("us30", "US30", syms["us30"], brief["bias"]["us30"], history, now)}
+{_instrument("us100", "US100", syms["us100"], brief["bias"]["us100"], history, now)}
 </div>
 
 {_night(brief, tz)}
@@ -691,9 +806,17 @@ def render(brief: dict) -> str:
 </section>
 
 <section>
-  <h2>Headlines, last 12 hours</h2>
-  <p class="sub">Tags come from simple keyword rules and feed the headline driver above.</p>
-  <div class="panel">{_headlines(brief, tz, now)}</div>
+  <div class="sec-head">
+    <div>
+      <h2>Headlines, last 12 hours</h2>
+      <p class="sub">Tags come from simple keyword rules and feed the headline driver above.</p>
+    </div>
+    <div class="hl-filter" role="group" aria-label="Filter headlines">
+      <button type="button" class="fbtn active" data-hl="all">All</button>
+      <button type="button" class="fbtn" data-hl="tagged">Tagged only</button>
+    </div>
+  </div>
+  <div class="panel" id="hl-panel">{_headlines(brief, tz, now)}</div>
 </section>
 
 <footer>

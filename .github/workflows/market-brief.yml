@@ -5,8 +5,8 @@ name: Market Brief
 # in the "timer" environment, which has a 15- or 30-minute wait timer (set in
 # Settings > Environments). Waiting there costs no Actions minutes.
 # GitHub's own schedule below is a backup that restarts the chain if it
-# ever stops. On the free plan GitHub often skips scheduled runs, which is
-# why the chain exists.
+# ever stops (and handles the 3-hour weekend cadence). On the free plan
+# GitHub often skips scheduled weekday runs, which is why the chain exists.
 
 on:
   schedule:
@@ -23,7 +23,7 @@ on:
         default: false
 
 permissions:
-  contents: write   # publish the dashboard to the gh-pages branch
+  contents: write   # publish the dashboard to gh-pages and saved state to the state branch
   actions: write    # line up the next update; keep the schedule switched on
 
 jobs:
@@ -51,7 +51,7 @@ jobs:
     needs: wait
     if: ${{ !cancelled() && (needs.wait.result == 'success' || needs.wait.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 110
+    timeout-minutes: 130
     # One update at a time. A run that stays on around a big release makes
     # the next one wait instead of doubling up.
     concurrency:
@@ -68,11 +68,24 @@ jobs:
       - name: Install
         run: pip install -r requirements.txt
 
+      - name: Read timer cadence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          wait=$(gh api "repos/$REPO/environments/timer" \
+                   --jq '[.protection_rules[]? | select(.type=="wait_timer") | .wait_timer][0] // 0' 2>/dev/null) || wait=0
+          case "$wait" in ''|*[!0-9]*) wait=0 ;; esac
+          if [ "$wait" -ge 5 ]; then
+            echo "UPDATE_CADENCE_MIN=$wait" >> "$GITHUB_ENV"
+          fi
+
       - name: Update the dashboard
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CONNECT_CODE: ${{ secrets.TELEGRAM_CONNECT_CODE }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}   # optional, free: real release numbers
           PYTHONUNBUFFERED: "1"
         run: python main.py --hosted
@@ -84,6 +97,14 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
+          # Weekends (Fri 22:00 UTC to Sun 21:00 UTC): let the 3-hour cron
+          # handle weekend checks and restart the chain on Sunday evening.
+          dow=$(date -u +%u)
+          hr=$((10#$(date -u +%H)))
+          if { [ "$dow" -eq 5 ] && [ "$hr" -ge 22 ]; } || [ "$dow" -eq 6 ] || { [ "$dow" -eq 7 ] && [ "$hr" -lt 21 ]; }; then
+            echo "Market weekend in progress. Leaving weekend cadence to cron."
+            exit 0
+          fi
           # Safety: only chain if a wait timer of at least 10 minutes is set,
           # otherwise updates would run back to back.
           wait=$(gh api "repos/$REPO/environments/timer" \

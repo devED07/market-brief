@@ -15,9 +15,15 @@ import json
 from datetime import datetime, timedelta
 
 from .config import DATA_DIR
+from .util import atomic_write_json
 
 LOG_FILE = DATA_DIR / "release_log.json"
 KEEP_DAYS = 45
+
+_DOMINANT_TITLES = (
+    "non-farm", "cpi", "federal funds", "fomc", "pce", "gdp",
+    "retail sales", "ism manufacturing", "ism services", "jolts", "powell",
+)
 
 TARGETS = [
     {
@@ -48,7 +54,7 @@ TARGETS = [
         "name": "CPI",
         "match": "cpi",
         "not": None,
-        "lookback_days": 25,
+        "lookback_days": 18,
         "leads": [
             ("ppi", "PPI", 0.4),
             ("ism services prices", "ISM services prices", 0.3),
@@ -98,25 +104,36 @@ def _is_target(rel: dict, target: dict) -> bool:
     return any(target["match"] in t and not (target["not"] and target["not"] in t) for t in _titles(rel))
 
 
-def _lead_match(rel: dict, target: dict) -> tuple[str, float] | None:
-    best = None
+def _lead_matches(rel: dict, target: dict) -> list[tuple[str, float, str]]:
+    """All distinct lead-in definitions matched by this release group."""
+    if _is_target(rel, target):
+        return []
+    titles = _titles(rel)
+    by_name: dict[str, tuple[str, float, str]] = {}
     for word, name, weight in target["leads"]:
-        if any(word in t for t in _titles(rel)) and not _is_target(rel, target):
-            if best is None or weight > best[1]:
-                best = (name, weight, word)
-    return best
+        if any(word in t for t in titles):
+            prev = by_name.get(name)
+            if prev is None or weight > prev[1]:
+                by_name[name] = (name, weight, word)
+    return list(by_name.values())
 
 
 def _lead_value(entry: dict, word: str) -> tuple[float | None, str]:
     """The lead-in's surprise: actual vs forecast if FRED had the number,
-    otherwise the market's reaction. Returns (value, numbers to show)."""
+    otherwise the market's reaction (unless an unrelated top-tier release
+    at the same timestamp dominates the reaction). Returns (value, text)."""
     hits = [(title, d) for title, d in (entry.get("data") or {}).items() if word in title.lower()]
-    if not hits:
-        return entry.get("hawk"), ""
-    value = sum(d["z"] for _, d in hits) / len(hits)
-    if len(hits) == 1:
-        return value, hits[0][1]["text"]
-    return value, ", ".join(f"{t.replace(' m/m', '')} {d['text'].replace(' forecast', '')}" for t, d in hits)
+    if hits:
+        value = sum(d["z"] for _, d in hits) / len(hits)
+        if len(hits) == 1:
+            return value, hits[0][1]["text"]
+        return value, ", ".join(f"{t.replace(' m/m', '')} {d['text'].replace(' forecast', '')}" for t, d in hits)
+
+    headline = (entry.get("headline") or "").lower()
+    if headline and word not in headline:
+        if any(k in headline for k in _DOMINANT_TITLES):
+            return None, ""
+    return entry.get("hawk"), ""
 
 
 def reaction_text(target: dict, side: str) -> str:
@@ -143,51 +160,86 @@ def load_log() -> list[dict]:
 
 
 def update_log(releases: list[dict], now: datetime, persist: bool = True) -> list[dict]:
-    """Adds newly scored releases to the log and returns the full log."""
+    """Adds newly scored releases to the log (merging with prior data) and returns the full log."""
     log = {r["time"].isoformat(): r for r in (load_log() if persist else [])}
     for rel in releases:
-        data = rel.get("data") or {}
-        if rel.get("status") != "done" or (rel.get("hawk") is None and not data):
+        if rel.get("status") != "done":
             continue
-        log[rel["time"].isoformat()] = {
+        key = rel["time"].isoformat()
+        prev = log.get(key, {})
+        merged_data = {**(prev.get("data") or {}), **(rel.get("data") or {})}
+        hawk = rel["hawk"] if rel.get("hawk") is not None else prev.get("hawk")
+        verdict = rel["verdict"] if rel.get("hawk") is not None else (prev.get("verdict") or rel.get("verdict", ""))
+        if hawk is None and not merged_data:
+            continue
+        log[key] = {
             "time": rel["time"],
             "headline": rel["headline"],
             "titles": [e["title"] for e in rel["events"]],
-            "hawk": rel["hawk"],
-            "verdict": rel["verdict"],
-            "data": data,
+            "hawk": hawk,
+            "verdict": verdict,
+            "data": merged_data,
+            "weight": rel.get("weight", prev.get("weight", 1.0)),
+            "impact": rel.get("impact", prev.get("impact", "High")),
+            "lead_only": rel.get("lead_only", prev.get("lead_only", False)),
         }
     rows = sorted((r for r in log.values() if now - r["time"] < timedelta(days=KEEP_DAYS)),
                   key=lambda r: r["time"])
     if persist:
-        LOG_FILE.write_text(json.dumps([dict(r, time=r["time"].isoformat()) for r in rows]),
-                            encoding="utf-8")
+        atomic_write_json(LOG_FILE, [dict(r, time=r["time"].isoformat()) for r in rows])
     return rows
 
 
 # ------------------------------------------------------------------ reads
 
+def _collapse_repeats(items: list[dict]) -> list[dict]:
+    """Collapse repeated prints of the same weekly series into one weighted entry."""
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        grouped.setdefault(item["name"], []).append(item)
+    out: list[dict] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        group.sort(key=lambda x: x["time"])
+        latest = group[-1]
+        avg_hawk = sum(x["hawk"] for x in group) / len(group)
+        base_text = latest.get("text") or latest.get("verdict") or ""
+        text = f"{base_text} ({len(group)} prints)" if base_text else f"{len(group)} prints"
+        out.append({
+            "name": latest["name"],
+            "weight": latest["weight"],
+            "time": latest["time"],
+            "hawk": avg_hawk,
+            "verdict": latest.get("verdict", ""),
+            "text": text,
+        })
+    out.sort(key=lambda x: x["time"])
+    return out
+
+
 def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], now: datetime,
               extras: list[dict]) -> dict:
     start = rel["time"] - timedelta(days=target["lookback_days"])
-    scored, pending = [], []
+    raw_scored, pending = [], []
     for entry in log:
         if start <= entry["time"] < rel["time"]:
-            m = _lead_match(entry, target)
-            if m:
-                value, text = _lead_value(entry, m[2])
+            for name, weight, word in _lead_matches(entry, target):
+                value, text = _lead_value(entry, word)
                 if value is None:
                     continue
-                scored.append({"name": m[0], "weight": m[1], "time": entry["time"],
-                               "hawk": value, "verdict": entry.get("verdict", ""), "text": text})
+                raw_scored.append({"name": name, "weight": weight, "time": entry["time"],
+                                   "hawk": value, "verdict": entry.get("verdict", ""), "text": text})
     for x in extras:  # leads that aren't calendar events, such as gasoline prices
-        if x["key"] == target["key"] and x["time"] < rel["time"]:
-            scored.append(dict(x))
+        if x["key"] == target["key"] and start <= x["time"] < rel["time"]:
+            raw_scored.append(dict(x))
     for r in releases:
-        if r["status"] in ("upcoming", "waiting") and r["time"] < rel["time"] and not r.get("all_day"):
-            m = _lead_match(r, target)
-            if m:
-                pending.append({"name": m[0], "weight": m[1], "time": r["time"], "status": r["status"]})
+        if r["status"] in ("upcoming", "waiting") and start <= r["time"] < rel["time"] and not r.get("all_day"):
+            for name, weight, _word in _lead_matches(r, target):
+                pending.append({"name": name, "weight": weight, "time": r["time"], "status": r["status"]})
+
+    scored = _collapse_repeats(raw_scored)
 
     out = {"target": target, "release": rel, "scored": scored, "pending": pending,
            "lean": None, "side": None, "label": "Nothing to go on yet", "tone": "flat", "confidence": ""}
@@ -212,7 +264,7 @@ def _read_one(target: dict, rel: dict, log: list[dict], releases: list[dict], no
         out["side"] = "hot" if lean > 0 else "cold"
 
     if target["key"] == "pce" and any(s["name"] == "CPI" for s in scored):
-        out["confidence"] = "Fairly reliable"
+        out["confidence"] = "Mostly priced in (CPI/PPI set the forecast)"
     elif len(strong) >= 2 and agree >= 0.67 and total_w >= 0.8:
         out["confidence"] = "Moderate confidence"
     else:
@@ -238,7 +290,9 @@ def one_line(read: dict) -> str:
     label = read["label"][:1].lower() + read["label"][1:]
     if read["lean"] is None:
         return f"Lead-up: {label}."
-    text = f"Lead-up: {label} ({read['confidence'].lower()})."
+    conf = read["confidence"]
+    conf_txt = (conf[:1].lower() + conf[1:]) if conf else ""
+    text = f"Lead-up: {label} ({conf_txt})." if conf_txt else f"Lead-up: {label}."
     if read.get("side"):
         text += f" Usual first reaction if so: {reaction_text(read['target'], read['side'])}."
     return text

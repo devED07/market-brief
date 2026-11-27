@@ -17,9 +17,17 @@ if not exist ".venv\Scripts\python.exe" (
   ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 goto pipfail
+  copy /y requirements.txt ".venv\.requirements.txt" >nul
   echo.
   echo Setup done.
   echo.
+) else (
+  fc /b requirements.txt ".venv\.requirements.txt" >nul 2>nul
+  if errorlevel 1 (
+    echo Updating Python packages...
+    ".venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
+    if not errorlevel 1 copy /y requirements.txt ".venv\.requirements.txt" >nul
+  )
 )
 
 ".venv\Scripts\python.exe" main.py %*

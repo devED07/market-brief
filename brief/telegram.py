@@ -1,25 +1,29 @@
 """Telegram bot: alerts and a daily session brief.
 
-Setup on GitHub needs just one secret, TELEGRAM_BOT_TOKEN. Open your bot in
-Telegram and press Start; the next update finds your chat and locks onto it.
-(TELEGRAM_CHAT_ID still works if you'd rather set it yourself.)
+Setup on GitHub needs just one secret, TELEGRAM_BOT_TOKEN (plus optionally
+TELEGRAM_CHAT_ID or TELEGRAM_CONNECT_CODE). Open your bot in Telegram and press
+Start; the next update finds your chat and locks onto it.
 
-The chat id is stored scrambled with your bot token, because the app's saved
-state is published alongside the public dashboard.
+The chat id is stored scrambled with your bot token, because saved state is
+restored between runs.
 """
 
 import hashlib
 import json
 import os
 from datetime import datetime, timedelta
-
-import requests
+from html import escape
 
 from .config import DATA_DIR
 from .leadup import one_line as leadup_line
+from .util import atomic_write_json, fmt_time, make_session
 
 STATE_FILE = DATA_DIR / "alert_state.json"
 API = "https://api.telegram.org/bot{token}/{method}"
+MAX_MSG_LEN = 3800
+
+_session = make_session()
+_t = fmt_time
 
 
 # ------------------------------------------------------------------ state
@@ -36,7 +40,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     state["sent"] = state.get("sent", [])[-300:]
-    STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+    atomic_write_json(STATE_FILE, state)
 
 
 def _key(token: str) -> bytes:
@@ -57,7 +61,7 @@ def _unscramble(blob: str, token: str) -> str | None:
 # ------------------------------------------------------------------ telegram calls
 
 def _call(token: str, method: str, **params) -> dict:
-    resp = requests.post(API.format(token=token, method=method), data=params, timeout=15)
+    resp = _session.post(API.format(token=token, method=method), data=params, timeout=15)
     data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
     if resp.status_code != 200 or not data.get("ok"):
         raise RuntimeError(f"Telegram said {resp.status_code}: {str(data.get('description', resp.text))[:120]}")
@@ -75,16 +79,42 @@ def send(token: str, chat_id: str, text: str) -> str | None:
 
 
 def _find_chat(token: str) -> str | None:
-    """The most recent private chat that messaged the bot (e.g. pressed Start)."""
+    """Find the private chat to lock onto.
+
+    If TELEGRAM_CONNECT_CODE is set, require a message containing that code.
+    Otherwise pick the earliest private /start (or private message) and warn
+    if multiple distinct chats exist.
+    """
     try:
         updates = _call(token, "getUpdates", allowed_updates='["message"]').get("result", [])
     except Exception:
         return None
-    for u in reversed(updates):
-        chat = (u.get("message") or {}).get("chat") or {}
+
+    code = os.environ.get("TELEGRAM_CONNECT_CODE", "").strip()
+    private_msgs = []
+    for u in updates:
+        msg = u.get("message") or {}
+        chat = msg.get("chat") or {}
         if chat.get("type") == "private" and chat.get("id"):
-            return str(chat["id"])
-    return None
+            private_msgs.append((str(chat["id"]), (msg.get("text") or "").strip()))
+
+    if not private_msgs:
+        return None
+
+    if code:
+        for cid, text in private_msgs:
+            if text == code or text.startswith("/start " + code) or f" {code}" in text:
+                return cid
+        return None
+
+    distinct = {cid for cid, _ in private_msgs}
+    if len(distinct) > 1:
+        print("  ! Multiple Telegram users messaged this bot; set TELEGRAM_CHAT_ID or TELEGRAM_CONNECT_CODE to lock it safely.")
+
+    for cid, text in private_msgs:
+        if text.startswith("/start"):
+            return cid
+    return private_msgs[0][0]
 
 
 def _chat_id(settings, state: dict) -> tuple[str | None, bool]:
@@ -113,19 +143,18 @@ def _dashboard_url() -> str:
     return ""
 
 
-def _t(dt: datetime, tz, fmt: str = "%I:%M %p") -> str:
-    return dt.astimezone(tz).strftime(fmt).replace(" 0", " ").lstrip("0")
-
-
 def _summary(brief: dict, tz) -> str:
     lines = [
-        f"<b>{name}</b>: {inst['label']} ({inst['score']:+.1f})" + (", price disagrees" if inst.get("warning") else "")
+        f"<b>{name}</b>: {escape(inst['label'])} ({inst['score']:+.1f})"
+        + (", price disagrees" if inst.get("warning") else "")
         for name, inst in (("Gold", brief["bias"]["gold"]), ("US30", brief["bias"]["us30"]),
                            ("US100", brief["bias"]["us100"]))
     ]
     nxt = brief.get("next_release")
     if nxt:
-        lines.append(f"Next: {nxt['headline']} on {_t(nxt['time'], tz, '%a')} at {_t(nxt['time'], tz)}")
+        lines.append(
+            f"Next: {escape(nxt['headline'])} on {_t(nxt['time'], tz, '%a')} at {_t(nxt['time'], tz)}"
+        )
     return "\n".join(lines)
 
 
@@ -133,20 +162,20 @@ def _top_drivers(inst: dict, n: int = 2) -> str:
     ds = sorted((d for d in inst["drivers"] if abs(d["points"]) >= 0.3), key=lambda d: -abs(d["points"]))[:n]
     if not ds:
         return "nothing pushing hard"
-    return ", ".join(f"{d['name']} {d['points']:+.1f}" for d in ds)
+    return ", ".join(f"{escape(d['name'])} {d['points']:+.1f}" for d in ds)
 
 
 def session_brief(brief: dict, tz, now: datetime) -> str:
     g, u, n = brief["bias"]["gold"], brief["bias"]["us30"], brief["bias"]["us100"]
     lines = [f"🗒 <b>Session brief</b>, {_t(now, tz, '%a %b %d')}", ""]
     for name, inst in (("Gold", g), ("US30", u), ("US100", n)):
-        lines.append(f"<b>{name}</b>: {inst['label']} ({inst['score']:+.1f})")
+        lines.append(f"<b>{name}</b>: {escape(inst['label'])} ({inst['score']:+.1f})")
         lines.append(f"   Driven by {_top_drivers(inst)}")
         if inst.get("warning"):
             lines.append("   ⚠️ Price disagrees with the data and news")
     geo = brief.get("geo")
     if geo:
-        lines.append(f"Geopolitics: {geo['level']} ({geo['ratio']:.1f}x normal)")
+        lines.append(f"Geopolitics: {escape(geo['level'])} ({geo['ratio']:.1f}x normal)")
 
     today = [r for r in brief["releases"]
              if r["status"] == "upcoming" and not r.get("lead_only") and not r.get("all_day")
@@ -156,14 +185,17 @@ def session_brief(brief: dict, tz, now: datetime) -> str:
         lines.append("<b>Coming up</b>")
         for r in today[:6]:
             flag = "🔴" if r["impact"] == "High" else "🟠"
-            lines.append(f"{flag} {_t(r['time'], tz)} {r['headline']}")
+            lines.append(f"{flag} {_t(r['time'], tz)} {escape(r['headline'])}")
     else:
         lines.append("No big US releases in the next 14 hours.")
     for read in brief.get("leadups", []):
-        lines.append(f"{read['target']['name']} ({_t(read['release']['time'], tz, '%a')}): {leadup_line(read)}")
+        lines.append(
+            f"{escape(read['target']['name'])} ({_t(read['release']['time'], tz, '%a')}): "
+            f"{escape(leadup_line(read))}"
+        )
     url = _dashboard_url()
     if url:
-        lines += ["", f'<a href="{url}">Open the dashboard</a>']
+        lines += ["", f'<a href="{escape(url, quote=True)}">Open the dashboard</a>']
     return "\n".join(lines)
 
 
@@ -177,6 +209,69 @@ def _brief_due(settings, state: dict, now: datetime) -> bool:
     key = f"brief|{local:%Y-%m-%d}"
     return (local.weekday() < 5 and due <= local < due + timedelta(hours=2)
             and key not in state["sent"])
+
+
+def _split_long(text: str, limit: int = MAX_MSG_LEN) -> list[str]:
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if cur:
+                parts.append("\n".join(cur))
+                cur, cur_len = [], 0
+            parts.append(line[:limit])
+            line = line[limit:]
+        add = len(line) + (1 if cur else 0)
+        if cur_len + add > limit and cur:
+            parts.append("\n".join(cur))
+            cur, cur_len = [line], len(line)
+        else:
+            cur.append(line)
+            cur_len += add
+    if cur:
+        parts.append("\n".join(cur))
+    return parts
+
+
+def _pack_chunks(items: list[dict], limit: int = MAX_MSG_LEN) -> list[dict]:
+    """Group alert items into Telegram-sized message chunks."""
+    chunks: list[dict] = []
+    cur_texts: list[str] = []
+    cur_sent: list[str] = []
+    cur_labels: dict[str, str] = {}
+    cur_pops: list[str] = []
+    cur_len = 0
+
+    def flush():
+        nonlocal cur_texts, cur_sent, cur_labels, cur_pops, cur_len
+        if cur_texts:
+            chunks.append({
+                "text": "\n\n".join(cur_texts),
+                "sent": cur_sent,
+                "labels": cur_labels,
+                "pops": cur_pops,
+            })
+            cur_texts, cur_sent, cur_labels, cur_pops, cur_len = [], [], {}, [], 0
+
+    for item in items:
+        pieces = _split_long(item["text"], limit)
+        for idx, piece in enumerate(pieces):
+            is_last = idx == len(pieces) - 1
+            sep = 2 if cur_texts else 0
+            if cur_texts and cur_len + sep + len(piece) > limit:
+                flush()
+                sep = 0
+            cur_texts.append(piece)
+            cur_len += sep + len(piece)
+            if is_last:
+                cur_sent.extend(item.get("sent", ()))
+                cur_labels.update(item.get("labels", {}))
+                cur_pops.extend(item.get("pops", ()))
+    flush()
+    return chunks
 
 
 # ------------------------------------------------------------------ main entry
@@ -194,40 +289,59 @@ def process(settings, brief: dict, now) -> str | None:
         _save_state(state)
         return "Telegram bot is set up, but no chat yet. Open your bot in Telegram and press Start."
 
-    messages = []
+    items: list[dict] = []
+    pending = state.setdefault("pending", {})
+
     if new_chat or not state.get("labels"):
-        messages.append("✅ <b>Market Brief is connected.</b> You'll get release warnings, reaction "
-                        "scores, bias changes, and a session brief each weekday evening.")
+        init_labels = {k: brief["bias"][k]["label"] for k in ("gold", "us30", "us100")}
+        if brief.get("geo"):
+            init_labels["geo"] = brief["geo"]["level"]
+        items.append({
+            "text": ("✅ <b>Market Brief is connected.</b> You'll get release warnings, reaction "
+                     "scores, bias changes, and a session brief each weekday evening."),
+            "labels": init_labels,
+        })
 
     # 1. Bias changed. A new label has to hold for two updates in a row
     # before it's announced, so a score hovering at a boundary doesn't ping
     # you every 15 minutes.
     changed = []
-    pending = state.setdefault("pending", {})
+    bias_labels: dict[str, str] = {}
+    bias_pops: list[str] = []
     for key, name in (("gold", "Gold"), ("us30", "US30"), ("us100", "US100")):
         label = brief["bias"][key]["label"]
         old = state["labels"].get(key)
         if not old:
-            state["labels"][key] = label
+            if state.get("labels"):
+                state["labels"][key] = label
+            continue  # handled by initial connected commit when labels is empty
         elif label == old:
             pending.pop(key, None)
         elif pending.get(key) == label:
-            changed.append(f"{name}: {old} → <b>{label}</b>")
-            state["labels"][key] = label
-            pending.pop(key, None)
+            changed.append(f"{name}: {escape(old)} → <b>{escape(label)}</b>")
+            bias_labels[key] = label
+            bias_pops.append(key)
         else:
             pending[key] = label
     if changed:
-        messages.append("Bias changed\n" + "\n".join(changed))
+        items.append({
+            "text": "Bias changed\n" + "\n".join(changed),
+            "labels": bias_labels,
+            "pops": bias_pops,
+        })
 
     # 1b. Geopolitical tension just turned high
     geo = brief.get("geo")
     if geo:
         old_geo = state["labels"].get("geo")
         if geo["level"] == "high" and old_geo and old_geo != "high":
-            messages.append(f"🌍 Geopolitical tension is <b>high</b>: conflict news at {geo['ratio']:.1f}x "
-                            "its 30-day normal. Usually supportive for gold, a headwind for US30 and US100.")
-        state["labels"]["geo"] = geo["level"]
+            items.append({
+                "text": (f"🌍 Geopolitical tension is <b>high</b>: conflict news at {geo['ratio']:.1f}x "
+                         "its 30-day normal. Usually supportive for gold, a headwind for US30 and US100."),
+                "labels": {"geo": "high"},
+            })
+        elif state.get("labels"):
+            state["labels"]["geo"] = geo["level"]
 
     # 2. Heads-up before high-impact releases (about 60 and 15 minutes out)
     for rel in brief["releases"]:
@@ -237,39 +351,54 @@ def process(settings, brief: dict, now) -> str | None:
         mark = 15 if 0 < mins <= 20 else 60 if 0 < mins <= 65 else None
         key = f"{rel['time'].isoformat()}|{mark}"
         if mark and key not in state["sent"]:
-            state["sent"].append(key)
+            sent_keys = [key]
             skip = f"{rel['time'].isoformat()}|60"
             if mark == 15 and skip not in state["sent"]:  # no point sending the 60-minute one late
-                state["sent"].append(skip)
-            extra = f" (forecast {rel['events'][0]['forecast']})" if rel["events"][0]["forecast"] else ""
-            msg = f"⚠️ <b>{rel['headline']}</b>{extra} in {int(mins)} min, at {_t(rel['time'], tz)}"
+                sent_keys.append(skip)
+            fc = rel["events"][0]["forecast"]
+            extra = f" (forecast {escape(fc)})" if fc else ""
+            msg = f"⚠️ <b>{escape(rel['headline'])}</b>{extra} in {int(mins)} min, at {_t(rel['time'], tz)}"
             for read in brief.get("leadups", []):
                 if read["release"]["time"] == rel["time"]:
-                    msg += "\n" + leadup_line(read)
-            messages.append(msg)
+                    msg += "\n" + escape(leadup_line(read))
+            items.append({"text": msg, "sent": sent_keys})
 
     # 3. Release scored
     for rel in brief["releases"]:
         if rel["status"] == "done" and rel["hawk"] is not None and rel["impact"] == "High":
             key = f"{rel['time'].isoformat()}|scored"
             if key not in state["sent"] and now - rel["time"] < timedelta(hours=2):
-                state["sent"].append(key)
-                messages.append(
-                    f"📊 {rel['headline']}: <b>{rel['verdict']}</b>\n"
-                    f"Gold {rel['gold_pct'] or 0:+.2f}%, US30 {rel['us30_pct'] or 0:+.2f}%, "
-                    f"US100 {rel.get('us100_pct') or 0:+.2f}% "
-                    f"in the first {rel['window_min']} min"
-                )
+                items.append({
+                    "text": (
+                        f"📊 {escape(rel['headline'])}: <b>{escape(rel['verdict'])}</b>\n"
+                        f"Gold {rel['gold_pct'] or 0:+.2f}%, US30 {rel['us30_pct'] or 0:+.2f}%, "
+                        f"US100 {rel.get('us100_pct') or 0:+.2f}% "
+                        f"in the first {rel['window_min']} min"
+                    ),
+                    "sent": [key],
+                })
 
     # 4. Session brief once each weekday evening
     if _brief_due(settings, state, now):
-        state["sent"].append(f"brief|{now.astimezone(tz):%Y-%m-%d}")
-        messages.append(session_brief(brief, tz, now))
-    elif settings.telegram_every_update or messages:
-        messages.append(_summary(brief, tz))
+        items.append({
+            "text": session_brief(brief, tz, now),
+            "sent": [f"brief|{now.astimezone(tz):%Y-%m-%d}"],
+        })
+    elif settings.telegram_every_update or items:
+        items.append({"text": _summary(brief, tz)})
 
     error = None
-    if messages:
-        error = send(settings.telegram_token, chat_id, "\n\n".join(messages))
+    for chunk in _pack_chunks(items):
+        err = send(settings.telegram_token, chat_id, chunk["text"])
+        if err:
+            error = err
+            break
+        for k in chunk["sent"]:
+            if k not in state["sent"]:
+                state["sent"].append(k)
+        state["labels"].update(chunk["labels"])
+        for p in chunk["pops"]:
+            pending.pop(p, None)
+
     _save_state(state)
     return error

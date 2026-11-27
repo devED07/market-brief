@@ -16,5 +16,11 @@ if [ ! -x ".venv/bin/python" ]; then
     read -n 1 -s -r -p "Press any key to close"
     exit 1
   fi
+  cp requirements.txt .venv/.requirements.txt
+elif ! cmp -s requirements.txt .venv/.requirements.txt 2>/dev/null; then
+  echo "Updating Python packages..."
+  if .venv/bin/python -m pip install -r requirements.txt --quiet; then
+    cp requirements.txt .venv/.requirements.txt
+  fi
 fi
 .venv/bin/python main.py "$@"

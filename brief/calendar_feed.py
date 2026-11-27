@@ -8,12 +8,10 @@ surprise from how the market reacted instead (see bias.py).
 import json
 import time
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-
-import requests
 
 from .config import DATA_DIR
 from .leadup import is_lead_in
+from .util import NEW_YORK, atomic_write_json, make_session
 
 FEEDS = [
     "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
@@ -21,7 +19,6 @@ FEEDS = [
 ]
 CACHE_FILE = DATA_DIR / "calendar_cache.json"
 CACHE_MAX_AGE_MIN = 60  # the feed asks people not to hammer it
-NEW_YORK = ZoneInfo("America/New_York")
 
 # Releases that move gold and the Dow the most. Matched against the title.
 TOP_TIER = (
@@ -33,8 +30,6 @@ TOP_TIER = (
 # Events with no fixed release time. The feed still gives them a clock time,
 # so the app lists them but doesn't count down to them or score them.
 ALL_DAY_WORDS = ("election", "referendum")
-
-HEADERS = {"User-Agent": "Mozilla/5.0 (personal market brief app)"}
 
 
 def _parse_time(text: str) -> datetime | None:
@@ -62,10 +57,11 @@ def _weight(title: str, impact: str) -> float:
 
 
 def _download() -> list[dict]:
+    session = make_session()
     rows: list[dict] = []
     for i, url in enumerate(FEEDS):
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=20)
+            resp = session.get(url, timeout=20)
             resp.raise_for_status()
             rows.extend(resp.json())
         except Exception:
@@ -89,7 +85,7 @@ def load_raw() -> tuple[list[dict], bool, str]:
 
     try:
         rows = _download()
-        CACHE_FILE.write_text(json.dumps({"fetched_at": time.time(), "rows": rows}), encoding="utf-8")
+        atomic_write_json(CACHE_FILE, {"fetched_at": time.time(), "rows": rows})
         return rows, True, ""
     except Exception as exc:
         if cached:

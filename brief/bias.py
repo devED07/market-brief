@@ -19,17 +19,22 @@ isn't counted for gold.
 Score runs from -10 (strongly bearish) to +10 (strongly bullish).
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .prices import pct, price_at
-
-NEW_YORK = ZoneInfo("America/New_York")
+from .util import NEW_YORK, short_title
 
 ZN_BIG = 0.25        # % move in 10Y T-note futures that counts as a big reaction
 DXY_BIG = 0.35       # % move in the dollar index that counts as big
 HALF_LIFE_H = 72     # a release's influence halves every 3 days
 YAHOO_DELAY_MIN = 12 # futures on Yahoo lag ~10 min, so wait before scoring
+
+_TOP_TIER_KEYS = (
+    "non-farm", "cpi", "federal funds", "fomc", "pce", "average hourly earnings",
+    "unemployment rate", "advance gdp", "retail sales", "ppi", "ism manufacturing",
+    "ism services", "powell", "jolts",
+)
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -38,6 +43,13 @@ def clamp(x: float, lo: float, hi: float) -> float:
 
 def _fmt_pct(x: float | None, digits: int = 2) -> str:
     return "n/a" if x is None else f"{x:+.{digits}f}%"
+
+
+def _infer_weight(headline: str) -> float:
+    low = (headline or "").lower()
+    if "adp" not in low and any(k in low for k in _TOP_TIER_KEYS):
+        return 1.5
+    return 1.0
 
 
 # ---------------------------------------------------------------- releases
@@ -91,14 +103,30 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
     return out
 
 
-def data_score(releases: list[dict], now: datetime) -> tuple[float | None, str]:
-    total, used, notes = 0.0, 0, []
+def data_score(releases: list[dict], now: datetime, log: list[dict] | None = None) -> tuple[float | None, str]:
+    merged: dict[str, dict] = {}
+    for entry in log or ():
+        if entry.get("hawk") is None or entry.get("lead_only"):
+            continue
+        age_h = (now - entry["time"]).total_seconds() / 3600
+        if 0 <= age_h <= 7 * 24:
+            merged[entry["time"].isoformat()] = {
+                "time": entry["time"],
+                "headline": entry.get("headline", ""),
+                "hawk": entry["hawk"],
+                "verdict": entry.get("verdict", ""),
+                "weight": entry.get("weight") if entry.get("weight") is not None else _infer_weight(entry.get("headline", "")),
+            }
     for r in releases:
-        if r["status"] != "done" or r["hawk"] is None or r.get("lead_only"):
+        if r.get("status") != "done" or r.get("hawk") is None or r.get("lead_only"):
             continue
         age_h = (now - r["time"]).total_seconds() / 3600
-        if age_h > 7 * 24:
-            continue
+        if 0 <= age_h <= 7 * 24:
+            merged[r["time"].isoformat()] = r
+
+    total, used, notes = 0.0, 0, []
+    for r in merged.values():
+        age_h = (now - r["time"]).total_seconds() / 3600
         contrib = r["hawk"] * r["weight"] * 0.5 ** (age_h / HALF_LIFE_H)
         total += contrib
         used += 1
@@ -108,41 +136,55 @@ def data_score(releases: list[dict], now: datetime) -> tuple[float | None, str]:
     notes.sort(key=lambda n: -n[0])
     lead = notes[0][1]
     scored = f"{used} release{'s' if used != 1 else ''} scored"
-    detail = f"{scored}. Biggest: {_short(lead['headline'])}, {lead['verdict'].lower()}"
+    detail = f"{scored}. Biggest: {short_title(lead['headline'])}, {lead['verdict'].lower()}"
     return clamp(total, -2.0, 2.0), detail
 
 
-def _short(title: str) -> str:
-    return (title.replace(" m/m", "").replace(" y/y", "").replace(" q/q", "")
-            .replace("Non-Farm Employment Change", "NFP"))
+_short = short_title
 
 
 # ---------------------------------------------------------------- market context
 
-def trend_score(snaps: dict) -> tuple[float | None, str]:
+def _stale_tag(snap: dict, market_open: bool, threshold_min: int) -> str:
+    if not market_open:
+        return ""
+    stale = snap.get("stale_min", 0)
+    if stale >= threshold_min:
+        return f" (stale {stale // 60}h)"
+    return ""
+
+
+def trend_score(snaps: dict, market_open: bool = True) -> tuple[float | None, str]:
     parts, bits = [], []
-    dx = snaps.get("dollar", {}).get("chg_24h")
-    zn = snaps.get("treasury_10y", {}).get("chg_24h")
+    dx_snap = snaps.get("dollar", {})
+    zn_snap = snaps.get("treasury_10y", {})
+    dx = dx_snap.get("chg_24h")
+    zn = zn_snap.get("chg_24h")
     if dx is not None:
         parts.append(clamp(dx / 0.5, -1.5, 1.5))
-        bits.append(f"dollar {_fmt_pct(dx)}")
+        bits.append(f"dollar {_fmt_pct(dx)}{_stale_tag(dx_snap, market_open, 180)}")
     if zn is not None:
         parts.append(clamp(-zn / 0.3, -1.5, 1.5))
         if abs(zn) < 0.05:
-            bits.append("yields flat")
+            y_txt = "yields flat"
         else:
-            bits.append("yields rising" if zn < 0 else "yields falling")
+            y_txt = "yields rising" if zn < 0 else "yields falling"
+        bits.append(y_txt + _stale_tag(zn_snap, market_open, 180))
     if not parts:
         return None, "No dollar or yield data"
     return sum(parts) / len(parts), ", ".join(bits) + " (24h)"
 
 
-def risk_score(snaps: dict) -> tuple[float | None, str]:
+def risk_score(snaps: dict, market_open: bool = True) -> tuple[float | None, str]:
     v = snaps.get("vix")
     if not v:
         return None, "No VIX data"
     level, chg = v["last"], v.get("chg_24h")
-    score = clamp((chg or 0) / 10, -1.0, 1.0)
+    stale_min = v.get("stale_min", 0)
+    chg_term = clamp((chg or 0) / 10, -1.0, 1.0)
+    if market_open and stale_min >= 360:
+        chg_term *= 0.5
+    score = chg_term
     if level >= 25:
         score += 0.75
     elif level >= 20:
@@ -153,6 +195,8 @@ def risk_score(snaps: dict) -> tuple[float | None, str]:
     detail = f"VIX {level:.1f}"
     if chg is not None:
         detail += f", {chg:+.0f}% in 24h"
+    if market_open and stale_min >= 360:
+        detail += f" (stale {stale_min // 60}h)"
     return clamp(score, -1.5, 1.5), f"{detail}; mood {mood}"
 
 
@@ -196,13 +240,25 @@ def gold_risk(r: float, detail: str, snaps: dict) -> tuple[float, str]:
         return r * 1.5, detail
     g = snaps.get("gold", {}).get("chg_24h")
     u = snaps.get("us30", {}).get("chg_24h")
+    n = snaps.get("us100", {}).get("chg_24h")
+    stocks_down = (u is not None and u < 0) or (n is not None and n < 0)
     if g is None:
         return r * 1.5, detail
-    if g <= -0.5 and u is not None and u < 0:
+    if g <= -0.5 and stocks_down:
         return 0.0, detail + ". Gold fell with stocks, so it's selling everything, not safe-haven buying"
     if g < -0.2:
         return r * 0.75, detail + ". Gold is slipping, so only half counts"
     return r * 1.5, detail
+
+
+def equity_dy_points(t: float, detail: str, r: float, snaps: dict, mult: float, key: str) -> tuple[float, str]:
+    """When VIX is nervous and stocks are falling while yields drop, lower
+    yields reflect flight-to-safety rather than a bullish tailwind for stocks."""
+    drop_cut = -0.5 if key == "us30" else -0.7
+    eq_chg = snaps.get(key, {}).get("chg_24h")
+    if t < -0.2 and r >= 0.4 and eq_chg is not None and eq_chg <= drop_cut:
+        return 0.0, detail + ". Yields falling on flight to safety, not counted as bullish for stocks"
+    return -t * mult, detail
 
 
 # ---------------------------------------------------------------- instruments
@@ -222,7 +278,8 @@ def _label(score: float) -> tuple[str, str]:
 
 def _instrument(name: str, drivers: list[dict], trend: dict) -> dict:
     drivers = drivers + [trend]
-    score = clamp(sum(d["points"] for d in drivers), -10.0, 10.0)
+    raw = sum(d["points"] for d in drivers)
+    score = clamp(raw, -10.0, 10.0)
     label, tone = _label(score)
 
     # Do the news and data point one way while price goes the other?
@@ -243,15 +300,17 @@ def _instrument(name: str, drivers: list[dict], trend: dict) -> dict:
         agreement = "Drivers agree"
     else:
         agreement = "Drivers are mixed, lower conviction"
-    return {"score": score, "label": label, "tone": tone, "drivers": drivers,
+    return {"score": score, "raw_score": raw, "clamped": abs(raw) > 10.0,
+            "label": label, "tone": tone, "drivers": drivers,
             "agreement": agreement, "warning": warning}
 
 
 def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
-          geo: tuple[float | None, str] = (None, "No geopolitical data this time")) -> dict:
-    d_score, d_detail = data_score(releases, now)
-    t_score, t_detail = trend_score(snaps)
-    r_score, r_detail = risk_score(snaps)
+          geo: tuple[float | None, str] = (None, "No geopolitical data this time"),
+          log: list[dict] | None = None, market_open: bool = True) -> dict:
+    d_score, d_detail = data_score(releases, now, log=log)
+    t_score, t_detail = trend_score(snaps, market_open=market_open)
+    r_score, r_detail = risk_score(snaps, market_open=market_open)
     h = headline_tone
     c = h["count"]
     h_detail = (f"{c['hawkish']} hawkish, {c['dovish']} dovish, "
@@ -262,6 +321,8 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
     u_trend, u_trend_detail = price_trend("us30", snaps)
     n_trend, n_trend_detail = price_trend("us100", snaps)
     g_risk, g_risk_detail = gold_risk(r, r_detail, snaps)
+    u_dy, u_dy_detail = equity_dy_points(t, t_detail, r, snaps, 1.5, "us30")
+    n_dy, n_dy_detail = equity_dy_points(t, t_detail, r, snaps, 1.8, "us100")
     geo_s, geo_detail = geo
     gs = geo_s or 0.0
 
@@ -274,7 +335,7 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
     ], {"name": "Price trend", "points": (g_trend or 0.0) * 2.0, "detail": g_trend_detail})
     us30 = _instrument("US30", [
         {"name": "US data this week", "points": -d * 1.5, "detail": d_detail},
-        {"name": "Dollar and yields", "points": -t * 1.5, "detail": t_detail},
+        {"name": "Dollar and yields", "points": u_dy, "detail": u_dy_detail},
         {"name": "Risk mood", "points": -r * 2.5, "detail": r_detail},
         {"name": "Headlines", "points": -h["rates"] * 0.8 - h["risk"] * 1.2, "detail": h_detail},
         {"name": "Geopolitics", "points": -gs * 1.0, "detail": geo_detail},
@@ -283,40 +344,78 @@ def build(releases: list[dict], snaps: dict, headline_tone: dict, now: datetime,
     # less when yields rise, so data and yields count a little more than for US30.
     us100 = _instrument("US100", [
         {"name": "US data this week", "points": -d * 1.8, "detail": d_detail},
-        {"name": "Dollar and yields", "points": -t * 1.8, "detail": t_detail},
+        {"name": "Dollar and yields", "points": n_dy, "detail": n_dy_detail},
         {"name": "Risk mood", "points": -r * 2.5, "detail": r_detail},
         {"name": "Headlines", "points": -h["rates"] * 1.0 - h["risk"] * 1.2, "detail": h_detail},
         {"name": "Geopolitics", "points": -gs * 1.0, "detail": geo_detail},
     ], {"name": "Price trend", "points": (n_trend or 0.0) * 2.0, "detail": n_trend_detail})
     return {"gold": gold, "us30": us30, "us100": us100,
             "components": {"data": d_score, "trend": t_score, "risk": r_score,
-                           "headline_rates": h["rates"], "headline_risk": h["risk"]}}
+                           "headline_rates": h["rates"], "headline_risk": h["risk"],
+                           "geo": geo_s}}
 
 
 # ---------------------------------------------------------------- timing
 
+def _easter_date(year: int) -> date:
+    """Gregorian Easter Sunday (Anonymous Gregorian algorithm)."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _is_cme_holiday(d: date) -> str:
+    if (d.month, d.day) == (1, 1):
+        return "New Year's Day"
+    if d == _easter_date(d.year) - timedelta(days=2):
+        return "Good Friday"
+    if (d.month, d.day) == (12, 25):
+        return "Christmas Day"
+    return ""
+
+
 def market_status(now: datetime, local_tz) -> dict:
     """Gold, Dow and Nasdaq futures trade Sun 6pm to Fri 5pm New York time, with a
-    one-hour break each day at 5pm New York."""
+    one-hour break each day at 5pm New York and closures on full CME holidays."""
     ny = now.astimezone(NEW_YORK)
     wd = ny.weekday()  # Monday = 0
     weekend = wd == 5 or (wd == 4 and ny.hour >= 17) or (wd == 6 and ny.hour < 18)
-    daily_break = not weekend and ny.hour == 17
     if weekend:
         days_to_sunday = (6 - wd) % 7
         reopen = (ny + timedelta(days=days_to_sunday)).replace(hour=18, minute=0, second=0, microsecond=0)
-        return {"open": False, "reason": "weekend", "reopen": reopen.astimezone(local_tz)}
+        return {"open": False, "reason": "weekend", "holiday_name": "", "reopen": reopen.astimezone(local_tz)}
+    holiday_name = _is_cme_holiday(ny.date())
+    if holiday_name and (wd == 4 or ny.hour < 18):
+        if wd == 4:
+            reopen = (ny + timedelta(days=2)).replace(hour=18, minute=0, second=0, microsecond=0)
+        else:
+            reopen = ny.replace(hour=18, minute=0, second=0, microsecond=0)
+        return {"open": False, "reason": "holiday", "holiday_name": holiday_name,
+                "reopen": reopen.astimezone(local_tz)}
+    daily_break = ny.hour == 17
     if daily_break:
         reopen = ny.replace(hour=18, minute=0, second=0, microsecond=0)
-        return {"open": False, "reason": "daily break", "reopen": reopen.astimezone(local_tz)}
-    return {"open": True, "reason": "", "reopen": None}
+        return {"open": False, "reason": "daily break", "holiday_name": "", "reopen": reopen.astimezone(local_tz)}
+    return {"open": True, "reason": "", "holiday_name": "", "reopen": None}
 
 
 def sessions_for_night(now: datetime, local_tz, market: dict | None = None) -> dict:
     """A 24h window in your time zone (6am to 6am) with the main sessions.
     Over the weekend it shows the first trading day after the reopen."""
     title = "Your trading day, 6am to 6am"
-    if market and market.get("reason") == "weekend" and market.get("reopen"):
+    if market and market.get("reason") in ("weekend", "holiday") and market.get("reopen"):
         now = market["reopen"] + timedelta(hours=1)
         title = f"{now.astimezone(local_tz):%A}'s trading day, 6am to 6am"
     local_now = now.astimezone(local_tz)
@@ -333,6 +432,7 @@ def sessions_for_night(now: datetime, local_tz, market: dict | None = None) -> d
     rows = []
     for name, tzname, (oh, om), (ch, cm) in defs:
         tz = ZoneInfo(tzname)
+        segs = []
         for offset in (-1, 0, 1):
             day = (win_start.astimezone(tz) + timedelta(days=offset)).date()
             if day.weekday() >= 5:
@@ -341,6 +441,12 @@ def sessions_for_night(now: datetime, local_tz, market: dict | None = None) -> d
             c = datetime(day.year, day.month, day.day, ch, cm, tzinfo=tz).astimezone(local_tz)
             if c <= win_start or o >= win_end:
                 continue
-            rows.append({"name": name, "open": max(o, win_start), "close": min(c, win_end)})
-            break
+            segs.append((max(o, win_start), min(c, win_end)))
+        if segs:
+            rows.append({
+                "name": name,
+                "open": segs[0][0],
+                "close": segs[0][1],
+                "segments": segs,
+            })
     return {"start": win_start, "end": win_end, "sessions": rows, "title": title}

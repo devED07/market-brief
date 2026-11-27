@@ -13,6 +13,7 @@ Options:
 
 import argparse
 import json
+import os
 import sys
 import time
 import traceback
@@ -29,11 +30,15 @@ from brief import news as N
 from brief import prices as P
 from brief import telegram as T
 from brief.config import DASHBOARD_FILE, DATA_DIR, load_settings
+from brief.util import atomic_write_json, atomic_write_text, fmt_time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
+
+SCORE_HISTORY_FILE = DATA_DIR / "score_history.json"
+_hm = fmt_time
 
 
 def next_run_time(now: datetime, settings, releases: list[dict]) -> datetime:
@@ -61,7 +66,39 @@ def next_run_time(now: datetime, settings, releases: list[dict]) -> datetime:
 # Hosted mode: stay on around big releases so the 15-minute heads-up and the
 # reaction score don't depend on GitHub's schedule, which can run late.
 STAY_BEFORE_MIN = 45
-MAX_JOB_MIN = 90
+MAX_JOB_MIN = 115
+
+
+def update_score_history(bias: dict, now: datetime, persist: bool = True) -> list[dict]:
+    """Maintain a rolling 48-hour log of instrument bias scores for sparklines."""
+    now_ms = int(now.timestamp() * 1000)
+    cutoff_ms = now_ms - 48 * 3600 * 1000
+    rows: list[dict] = []
+    if persist:
+        try:
+            loaded = json.loads(SCORE_HISTORY_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                rows = [r for r in loaded if isinstance(r, dict) and r.get("t", 0) >= cutoff_ms]
+        except Exception:
+            rows = []
+    rows.sort(key=lambda r: r["t"])
+    if not rows or (now_ms - rows[-1]["t"]) >= 5 * 60 * 1000:
+        rows.append({
+            "t": now_ms,
+            "gold": round(bias["gold"]["score"], 2),
+            "us30": round(bias["us30"]["score"], 2),
+            "us100": round(bias["us100"]["score"], 2),
+        })
+    if persist:
+        atomic_write_json(SCORE_HISTORY_FILE, rows)
+    return rows
+
+
+def _cadence_minutes(settings) -> int:
+    raw = os.environ.get("UPDATE_CADENCE_MIN", "").strip()
+    if raw.isdigit() and int(raw) >= 5:
+        return int(raw)
+    return settings.refresh_minutes
 
 
 def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple[dict, str]:
@@ -79,20 +116,28 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         snaps = {k: P.snapshot(s, now) for k, s in series.items()}
         clock_offset_ms = int((now - datetime.now(timezone.utc)).total_seconds() * 1000)
         geo_summary = {"ratio": 1.3, "level": "elevated", "time": now.isoformat()}
+        market = {"open": True, "reason": "", "holiday_name": "", "reopen": None}
     else:
         now = datetime.now(timezone.utc)
+        market = B.market_status(now, tz)
         rows, _fresh, note = C.load_raw()
         if note:
             problems.append(note)
 
         series, snaps, price_problems = P.fetch_all(symbols, now)
+        cached_snaps = P.load_snaps_cache(now, weekend=market.get("reason") in ("weekend", "holiday"))
         for key in symbols:
-            if key not in series and key in memory.get("series", {}):
-                series[key] = memory["series"][key]
-                snaps[key] = memory["snaps"][key]
+            if key not in snaps:
+                if key in memory.get("snaps", {}):
+                    if key in memory.get("series", {}):
+                        series[key] = memory["series"][key]
+                    snaps[key] = memory["snaps"][key]
+                elif key in cached_snaps:
+                    snaps[key] = cached_snaps[key]
         problems.extend(price_problems)
         memory.setdefault("series", {}).update(series)
         memory.setdefault("snaps", {}).update(snaps)
+        P.save_snaps_cache(snaps, now)
 
         headlines, news_problems = N.recent_cache(now), []
         if not headlines:
@@ -127,9 +172,12 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
     log = L.update_log(releases, now, persist=not demo)
     leadups = L.build(releases, log, now, extras)
     upcoming_high = [r for r in releases if r["status"] == "upcoming" and r["impact"] == "High"]
-    market = B.market_status(now, tz)
-    if demo:
-        market = {"open": True, "reason": "", "reopen": None}
+
+    bias = B.build(
+        releases, snaps, N.tone(headlines, now=now), now,
+        geo=G.score(geo_summary), log=log, market_open=market["open"],
+    )
+    history = DM.demo_history(now, bias) if demo else update_score_history(bias, now, persist=True)
 
     brief = {
         "now": now,
@@ -139,30 +187,28 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         "next_release": upcoming_high[0] if upcoming_high else None,
         "snaps": snaps,
         "headlines": headlines,
-        "bias": B.build(releases, snaps, N.tone(headlines), now, G.score(geo_summary)),
+        "bias": bias,
+        "history": history,
         "geo": geo_summary,
         "market": market,
         "night": B.sessions_for_night(now, tz, market),
         "leadups": leadups,
         "problems": problems,
         "next_update": next_run_time(now, settings, releases),
+        "cadence_min": _cadence_minutes(settings),
         "demo": demo,
         "hosted": hosted,
         "clock_offset_ms": clock_offset_ms,
     }
     html = D.render(brief)
     if not hosted:
-        DASHBOARD_FILE.write_text(html, encoding="utf-8")
+        atomic_write_text(DASHBOARD_FILE, html)
 
     if not demo:
         err = T.process(settings, brief, now)
         if err:
             print(f"  ! {err}")
     return brief, html
-
-
-def _hm(dt: datetime, tz) -> str:
-    return dt.astimezone(tz).strftime("%I:%M %p").lstrip("0")
 
 
 def print_summary(brief: dict, tz) -> None:
@@ -214,17 +260,29 @@ def run_hosted(settings) -> None:
         print("Telegram alerts are on.")
     memory: dict = {}
     started = datetime.now(timezone.utc)
+    cycle_idx = 0
+    last_until: datetime | None = None
     while True:
-        brief, html = run_cycle(settings, False, memory, hosted=True)
-        print_summary(brief, tz)
-        PUB.publish(html, int(brief["now"].timestamp() * 1000),
-                    f"Update {brief['now']:%Y-%m-%d %H:%M} UTC")
-        print("           Published to GitHub Pages.")
+        try:
+            brief, html = run_cycle(settings, False, memory, hosted=True)
+            print_summary(brief, tz)
+            PUB.publish(html, int(brief["now"].timestamp() * 1000),
+                        f"Update {brief['now']:%Y-%m-%d %H:%M} UTC")
+            print("           Published to GitHub Pages.")
+            now = datetime.now(timezone.utc)
+            last_until = _stay_until(brief["releases"], now)
+            nxt = next_run_time(now, settings, brief["releases"])
+        except Exception as exc:
+            if cycle_idx == 0:
+                raise
+            print(f"  ! Stay-on update failed: {exc}. Retrying in 2 minutes.")
+            with open(DATA_DIR / "error.log", "a", encoding="utf-8") as f:
+                f.write(f"\n--- {datetime.now()} ---\n{traceback.format_exc()}")
+            now = datetime.now(timezone.utc)
+            nxt = now + timedelta(minutes=2)
 
-        now = datetime.now(timezone.utc)
-        until = _stay_until(brief["releases"], now)
-        nxt = next_run_time(now, settings, brief["releases"])
-        if until is None or nxt > until or nxt > started + timedelta(minutes=MAX_JOB_MIN):
+        cycle_idx += 1
+        if last_until is None or nxt > last_until or nxt > started + timedelta(minutes=MAX_JOB_MIN):
             break
         print(f"           Big release nearby, staying on. Next update at {_hm(nxt, tz)}\n")
         while datetime.now(timezone.utc) < nxt:

@@ -88,9 +88,28 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         return float(sub.iloc[-1])
 
     ny_dates = series.index.tz_convert(NEW_YORK).normalize()
-    last_5 = ny_dates.unique()[-5:]
+    uniq_dates = ny_dates.unique()
+    last_5 = uniq_dates[-5:]
     window = series[ny_dates.isin(last_5)]
     avg_5d = float(window.mean()) if len(window) > 50 else None
+
+    pdh = pdl = range_used = None
+    if len(uniq_dates) >= 2:
+        prev_day = series[ny_dates == uniq_dates[-2]]
+        if not prev_day.empty:
+            pdh = float(prev_day.max())
+            pdl = float(prev_day.min())
+        today_bars = series[ny_dates == uniq_dates[-1]]
+        prior_ranges = []
+        for d in uniq_dates[-6:-1]:
+            day_s = series[ny_dates == d]
+            if len(day_s) >= 12 and float(day_s.iloc[0]) > 0:
+                prior_ranges.append((float(day_s.max()) - float(day_s.min())) / float(day_s.iloc[0]) * 100.0)
+        if not today_bars.empty and prior_ranges and float(today_bars.iloc[0]) > 0:
+            today_rng = (float(today_bars.max()) - float(today_bars.min())) / float(today_bars.iloc[0]) * 100.0
+            avg_rng = sum(prior_ranges) / len(prior_ranges)
+            if avg_rng > 0:
+                range_used = round(today_rng / avg_rng, 2)
 
     return {
         "last": last,
@@ -101,6 +120,9 @@ def snapshot(series: pd.Series, now: datetime) -> dict:
         "chg_30m": pct(ago(30, max_gap_min=35), last),
         "chg_4h": pct(ago(240, max_gap_min=90), last),
         "chg_24h": pct(ago(1440, max_gap_min=72 * 60), last),
+        "pdh": pdh,
+        "pdl": pdl,
+        "range_used": range_used,
     }
 
 

@@ -103,6 +103,32 @@ def score_release(rel: dict, series: dict, now: datetime) -> dict:
     return out
 
 
+def apply_fred_fallback(releases: list[dict]) -> None:
+    """Use FRED's official surprise when market reaction bars are missing, and
+    flag releases where the initial reaction ran opposite the official print."""
+    for rel in releases:
+        if rel.get("status") != "done":
+            continue
+        data = rel.get("data") or {}
+        if not data:
+            continue
+        fred_z = clamp(sum(d["z"] for d in data.values()) / len(data), -2.0, 2.0)
+        if rel.get("hawk") is None:
+            rel["hawk"] = fred_z
+            if fred_z >= 1.0:
+                rel["verdict"] = "Hawkish surprise (FRED)"
+            elif fred_z >= 0.3:
+                rel["verdict"] = "Leaned hawkish (FRED)"
+            elif fred_z <= -1.0:
+                rel["verdict"] = "Dovish surprise (FRED)"
+            elif fred_z <= -0.3:
+                rel["verdict"] = "Leaned dovish (FRED)"
+            else:
+                rel["verdict"] = "In line (FRED)"
+        elif rel["hawk"] * fred_z < -0.5 and abs(rel["hawk"]) >= 0.5 and abs(fred_z) >= 0.5:
+            rel["discrepancy"] = "Market went opposite the print"
+
+
 def data_score(releases: list[dict], now: datetime, log: list[dict] | None = None) -> tuple[float | None, str]:
     merged: dict[str, dict] = {}
     for entry in log or ():
@@ -376,19 +402,64 @@ def _easter_date(year: int) -> date:
     return date(year, month, day)
 
 
+def _observed_holiday(target: date) -> date:
+    if target.weekday() == 5:
+        return target - timedelta(days=1)
+    if target.weekday() == 6:
+        return target + timedelta(days=1)
+    return target
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + (n - 1) * 7)
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    next_m = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last = next_m - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
 def _is_cme_holiday(d: date) -> str:
-    if (d.month, d.day) == (1, 1):
+    if d == _observed_holiday(date(d.year, 1, 1)) or d == _observed_holiday(date(d.year + 1, 1, 1)):
         return "New Year's Day"
     if d == _easter_date(d.year) - timedelta(days=2):
         return "Good Friday"
-    if (d.month, d.day) == (12, 25):
+    if d == _observed_holiday(date(d.year, 12, 25)):
         return "Christmas Day"
+    return ""
+
+
+def _is_cme_early_close(d: date) -> str:
+    if d.weekday() >= 5:
+        return ""
+    if d == _nth_weekday(d.year, 1, 0, 3):
+        return "Martin Luther King Jr. Day"
+    if d == _nth_weekday(d.year, 2, 0, 3):
+        return "Presidents' Day"
+    if d == _last_weekday(d.year, 5, 0):
+        return "Memorial Day"
+    if d == _observed_holiday(date(d.year, 6, 19)):
+        return "Juneteenth"
+    if d == _observed_holiday(date(d.year, 7, 4)):
+        return "Independence Day"
+    if d == _nth_weekday(d.year, 9, 0, 1):
+        return "Labor Day"
+    thanksgiving = _nth_weekday(d.year, 11, 3, 4)
+    if d == thanksgiving:
+        return "Thanksgiving Day"
+    if d == thanksgiving + timedelta(days=1):
+        return "Day after Thanksgiving"
+    if (d.month, d.day) == (12, 24) and not _is_cme_holiday(d):
+        return "Christmas Eve"
     return ""
 
 
 def market_status(now: datetime, local_tz) -> dict:
     """Gold, Dow and Nasdaq futures trade Sun 6pm to Fri 5pm New York time, with a
-    one-hour break each day at 5pm New York and closures on full CME holidays."""
+    one-hour break each day at 5pm New York and closures on CME holidays/early closes."""
     ny = now.astimezone(NEW_YORK)
     wd = ny.weekday()  # Monday = 0
     weekend = wd == 5 or (wd == 4 and ny.hour >= 17) or (wd == 6 and ny.hour < 18)
@@ -403,6 +474,14 @@ def market_status(now: datetime, local_tz) -> dict:
         else:
             reopen = ny.replace(hour=18, minute=0, second=0, microsecond=0)
         return {"open": False, "reason": "holiday", "holiday_name": holiday_name,
+                "reopen": reopen.astimezone(local_tz)}
+    early_name = _is_cme_early_close(ny.date())
+    if early_name and ((ny.hour == 13 and ny.minute >= 15) or 14 <= ny.hour < 18):
+        if wd == 4:
+            reopen = (ny + timedelta(days=2)).replace(hour=18, minute=0, second=0, microsecond=0)
+        else:
+            reopen = ny.replace(hour=18, minute=0, second=0, microsecond=0)
+        return {"open": False, "reason": "early close", "holiday_name": early_name,
                 "reopen": reopen.astimezone(local_tz)}
     daily_break = ny.hour == 17
     if daily_break:

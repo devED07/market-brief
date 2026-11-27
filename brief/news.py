@@ -99,7 +99,7 @@ US_CTX = re.compile(
 
 _NEG_CUT = re.compile(
     r"\b(no|not|without|rules? out|delays?|push(?:es|ing)? back|fewer|less likely|trims?|par(?:e|es|ing)|skips?|pauses?)\b"
-    r".{0,30}\b(rate cuts?|cuts? rates?)\b"
+    r".{0,30}\b(rate[- ]cuts?|cuts? rates?)\b"
 )
 _NEG_RECESSION = re.compile(
     r"\b(avoids?|no|not|without|less likely)\b.{0,20}\brecession\b"

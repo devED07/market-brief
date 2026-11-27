@@ -32,9 +32,9 @@ def test_incremental_loop_breaks_and_memoizes_404(tmp_path, monkeypatch):
     monkeypatch.setattr(G, "HISTORY_FILE", hist_file)
 
     now = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
-    # Pre-seed 8 days of history including a missing gap earlier and `latest` slot
+    # Pre-seed 22 days of history including `latest` slot (above 20-day backfill threshold)
     slots = {}
-    for d in range(1, 9):
+    for d in range(1, 23):
         day = now - timedelta(days=d)
         slots[G._stamp(day)] = [10, 100]
     latest = now.replace(minute=0, second=0, microsecond=0)

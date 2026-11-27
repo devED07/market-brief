@@ -387,18 +387,44 @@ def process(settings, brief: dict, now) -> str | None:
     elif settings.telegram_every_update or items:
         items.append({"text": _summary(brief, tz)})
 
+    # 5. Data outage alert after 3+ consecutive problem runs (at most once per 6h)
+    probs = brief.get("problems") or []
+    outage_commit = False
+    if probs:
+        state["fail_streak"] = int(state.get("fail_streak") or 0) + 1
+        last_outage_raw = state.get("outage_alerted_at")
+        last_outage_ok = True
+        if last_outage_raw:
+            try:
+                last_outage_ok = (now - datetime.fromisoformat(last_outage_raw)) >= timedelta(hours=6)
+            except Exception:
+                last_outage_ok = True
+        if state["fail_streak"] >= 3 and last_outage_ok:
+            summary_probs = "; ".join(escape(p) for p in probs[:3])
+            items.append({
+                "text": f"⚠️ <b>Data feed issue</b> ({state['fail_streak']} runs in a row): {summary_probs}",
+            })
+            outage_commit = True
+    else:
+        state["fail_streak"] = 0
+
     error = None
+    sent_any = False
     for chunk in _pack_chunks(items):
         err = send(settings.telegram_token, chat_id, chunk["text"])
         if err:
             error = err
             break
+        sent_any = True
         for k in chunk["sent"]:
             if k not in state["sent"]:
                 state["sent"].append(k)
         state["labels"].update(chunk["labels"])
         for p in chunk["pops"]:
             pending.pop(p, None)
+
+    if outage_commit and sent_any and error is None:
+        state["outage_alerted_at"] = now.isoformat()
 
     _save_state(state)
     return error

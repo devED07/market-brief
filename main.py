@@ -163,12 +163,14 @@ def run_cycle(settings, demo: bool, memory: dict, hosted: bool = False) -> tuple
         F.attach(releases, now, "", persist=False, fixed=DM.ACTUALS)
         extras.append(dict(DM.GASOLINE, time=now - timedelta(days=2)))
     else:
-        fred_problem = F.attach(releases, now, fred_key)
+        fred_client = F._Fred(fred_key) if fred_key else None
+        fred_problem = F.attach(releases, now, fred_key, fred=fred_client)
         if fred_problem:
             problems.append(fred_problem)
-        gas = F.gasoline_lead(now, fred_key)
+        gas = F.gasoline_lead(now, fred_key, fred=fred_client)
         if gas:
             extras.append(gas)
+    B.apply_fred_fallback(releases)
     log = L.update_log(releases, now, persist=not demo)
     leadups = L.build(releases, log, now, extras)
     upcoming_high = [r for r in releases if r["status"] == "upcoming" and r["impact"] == "High"]

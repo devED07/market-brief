@@ -85,6 +85,19 @@ def test_market_status_cme_holidays():
     nyd = datetime(2026, 1, 1, 11, 0, tzinfo=ny).astimezone(timezone.utc)
     assert B.market_status(nyd, ny)["holiday_name"] == "New Year's Day"
 
+    # Observed Christmas (Dec 25 2027 is Saturday -> observed Friday Dec 24)
+    obs_xmas = datetime(2027, 12, 24, 11, 0, tzinfo=ny).astimezone(timezone.utc)
+    assert B.market_status(obs_xmas, ny)["holiday_name"] == "Christmas Day"
+
+    # Black Friday 2026 (Nov 27 2026): open at 10am, early close at 2pm
+    bf_open = datetime(2026, 11, 27, 10, 0, tzinfo=ny).astimezone(timezone.utc)
+    assert B.market_status(bf_open, ny)["open"] is True
+    bf_closed = datetime(2026, 11, 27, 14, 0, tzinfo=ny).astimezone(timezone.utc)
+    st_bf = B.market_status(bf_closed, ny)
+    assert st_bf["open"] is False
+    assert st_bf["reason"] == "early close"
+    assert st_bf["holiday_name"] == "Day after Thanksgiving"
+
 
 def test_sessions_for_night_wraps_in_ny_and_build_exposes_clamped():
     ny = ZoneInfo("America/New_York")

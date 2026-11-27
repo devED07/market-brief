@@ -113,3 +113,30 @@ def test_scramble_and_connect_code(monkeypatch):
         ]
     })
     assert T._find_chat(tok) == "222"
+
+
+def test_outage_alert_after_three_consecutive_problem_runs(tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "STATE_FILE", tmp_path / "alert_state.json")
+    now = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)
+    T._save_state({"labels": {"gold": "Flat", "us30": "No clear lean", "us100": "No clear lean", "geo": "normal"}, "sent": []})
+
+    sent_msgs = []
+    monkeypatch.setattr(T, "send", lambda tok, cid, txt: sent_msgs.append(txt) or None)
+
+    b = _brief(now, gold_label="Flat")
+    b["releases"] = []
+    b["problems"] = ["Google News didn't respond"]
+
+    assert T.process(_settings(), b, now) is None
+    assert T.process(_settings(), b, now + timedelta(minutes=30)) is None
+    assert sent_msgs == []  # only 2 failures so far
+
+    assert T.process(_settings(), b, now + timedelta(minutes=60)) is None
+    assert len(sent_msgs) == 1
+    assert "Data feed issue" in sent_msgs[0]
+    assert "3 runs in a row" in sent_msgs[0]
+
+    # Run 4 within 6h does not spam
+    sent_msgs.clear()
+    assert T.process(_settings(), b, now + timedelta(minutes=90)) is None
+    assert sent_msgs == []

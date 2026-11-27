@@ -67,6 +67,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--event);outline-offs
 .scale-ends{display:flex;justify-content:space-between;color:var(--faint);font-size:12px;margin-left:86px}
 .sparkwrap{display:flex;align-items:center;gap:10px;margin:8px 0 2px;color:var(--faint);font-size:12px}
 .spark{width:130px;height:26px;flex:0 0 auto;overflow:visible}
+.levels{color:var(--faint);font-size:12px;margin:4px 0 2px}
+.levels .stretched{color:var(--gold);font-weight:600}
+.rel-out .disc{display:block;color:var(--gold);font-size:12px}
 .agree{color:var(--muted);font-size:13px;margin:8px 0 12px}
 .warn{margin:0 0 12px;padding:9px 12px;border-radius:5px;font-size:13px;line-height:1.45;
   border:1px solid color-mix(in srgb,var(--gold) 50%,transparent);background:color-mix(in srgb,var(--gold) 10%,var(--panel))}
@@ -360,14 +363,27 @@ def _sparkline(key: str, history: list[dict], now: datetime) -> str:
 
 # ------------------------------------------------------------------ sections
 
+def _levels_html(key: str, snap: dict | None) -> str:
+    if not snap or snap.get("pdh") is None or snap.get("pdl") is None:
+        return ""
+    bits = [f'PDH {_num(key, snap["pdh"])}', f'PDL {_num(key, snap["pdl"])}']
+    ru = snap.get("range_used")
+    if ru is not None:
+        stretched = ' <span class="stretched">(stretched)</span>' if ru >= 1.5 else ""
+        bits.append(f'Range {ru:.1f}× avg{stretched}')
+    return f'<div class="levels">{" · ".join(bits)}</div>'
+
+
 def _instrument(key: str, name: str, symbol: str, data: dict,
-                history: list[dict] | None = None, now: datetime | None = None) -> str:
+                history: list[dict] | None = None, now: datetime | None = None,
+                snap: dict | None = None) -> str:
     score = data["score"]
     pos = (score + 10) / 20 * 100
     left, width = (50, pos - 50) if score >= 0 else (pos, 50 - pos)
     fill_color = {"bull": "var(--bull)", "bear": "var(--bear)", "flat": "var(--flat)"}[data["tone"]]
     capped_tag = ' <small class="capped">(capped)</small>' if data.get("clamped") else ""
     spark = _sparkline(key, history or [], now) if now else ""
+    levels = _levels_html(key, snap)
     rows = []
     for d in data["drivers"]:
         rows.append(
@@ -387,6 +403,7 @@ def _instrument(key: str, name: str, symbol: str, data: dict,
   </div>
   <div class="scale-ends"><span>Bearish</span><span>Bullish</span></div>
   {spark}
+  {levels}
   <div class="agree">{escape(data['agreement'])}</div>
   {f'<p class="warn" role="note">{escape(data["warning"])}</p>' if data.get("warning") else ""}
   <table class="drivers">{''.join(rows)}</table>
@@ -405,6 +422,8 @@ def _banners(brief: dict, tz, now: datetime) -> str:
             what = "for the weekend"
         elif mkt["reason"] == "holiday":
             what = f'for {escape(mkt.get("holiday_name") or "a market holiday")}'
+        elif mkt["reason"] == "early close":
+            what = f'for {escape(mkt.get("holiday_name") or "holiday")} early close'
         else:
             what = "for the daily one-hour break"
         out.append(f'<div class="banner closed"><strong>Gold, US30 and US100 futures are closed {what}.</strong>'
@@ -659,7 +678,8 @@ def _releases(brief: dict, tz, now: datetime) -> str:
                 u = "n/a" if r["us30_pct"] is None else f'{r["us30_pct"]:+.2f}%'
                 n = "n/a" if r.get("us100_pct") is None else f'{r["us100_pct"]:+.2f}%'
                 moves = f'<span class="moves">Gold {g}, US30 {u}, US100 {n}</span>'
-            right = f'<span class="v {tone}">{escape(r["verdict"])}</span>{moves}'
+            disc = f'<span class="disc">{escape(r["discrepancy"])}</span>' if r.get("discrepancy") else ""
+            right = f'<span class="v {tone}">{escape(r["verdict"])}</span>{moves}{disc}'
         imp = "imp" if r["impact"] == "High" else "imp med"
         out.append(
             f'<div class="rel-row"><span class="rel-time">{"All day" if r["status"] == "all_day" else _t(r["time"], tz)}</span>'
@@ -783,9 +803,9 @@ def render(brief: dict) -> str:
 {_banners(brief, tz, now)}
 
 <div class="bias">
-{_instrument("gold", "Gold", syms["gold"], brief["bias"]["gold"], history, now)}
-{_instrument("us30", "US30", syms["us30"], brief["bias"]["us30"], history, now)}
-{_instrument("us100", "US100", syms["us100"], brief["bias"]["us100"], history, now)}
+{_instrument("gold", "Gold", syms["gold"], brief["bias"]["gold"], history, now, brief["snaps"].get("gold"))}
+{_instrument("us30", "US30", syms["us30"], brief["bias"]["us30"], history, now, brief["snaps"].get("us30"))}
+{_instrument("us100", "US100", syms["us100"], brief["bias"]["us100"], history, now, brief["snaps"].get("us100"))}
 </div>
 
 {_night(brief, tz)}

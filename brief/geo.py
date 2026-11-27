@@ -182,9 +182,9 @@ def update_history(now: datetime) -> dict[str, list[int]]:
                 if ok:
                     hist[_stamp(slot)] = list(counts) if counts else [0, 0]
 
-    # First run (or schema upgrade / long gap): sample the past 30 days in chunks
+    # First run (or schema upgrade / partial backfill): sample the past 30 days in chunks
     valid_days = {k[:8] for k, v in hist.items() if v and v[1] > 0}
-    if len(valid_days) < 7:
+    if len(valid_days) < 20:
         backfill: list[datetime] = []
         t = _slot(latest - timedelta(hours=BACKFILL_STEP_H))
         while t > now - timedelta(days=30):

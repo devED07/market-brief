@@ -101,3 +101,23 @@ def test_pce_confidence_and_update_log_merge(tmp_path, monkeypatch):
     assert "Mostly priced in" in read["confidence"]
     line = L.one_line(read)
     assert "CPI/PPI" in line
+
+
+def test_ism_prices_reads_own_ism_report_reaction():
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    cpi_rel = {
+        "time": now + timedelta(days=3), "status": "upcoming", "all_day": False,
+        "headline": "CPI m/m", "events": [{"title": "CPI m/m"}],
+    }
+    log = [{
+        "time": now - timedelta(days=2),
+        "headline": "ISM Services PMI",
+        "titles": ["ISM Services PMI", "ISM Services Prices"],
+        "hawk": 1.1,
+        "verdict": "Hawkish surprise",
+        "data": {},
+    }]
+    read = L.build([cpi_rel], log, now)[0]
+    assert len(read["scored"]) == 1
+    assert read["scored"][0]["name"] == "ISM services prices"
+    assert read["scored"][0]["text"] == "ISM report reaction"

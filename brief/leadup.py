@@ -131,6 +131,8 @@ def _lead_value(entry: dict, word: str) -> tuple[float | None, str]:
 
     headline = (entry.get("headline") or "").lower()
     if headline and word not in headline:
+        if word.startswith("ism ") and headline.startswith(word.rsplit(" ", 1)[0]):
+            return entry.get("hawk"), "ISM report reaction"
         if any(k in headline for k in _DOMINANT_TITLES):
             return None, ""
     return entry.get("hawk"), ""

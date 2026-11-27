@@ -14,6 +14,9 @@ def test_not_us_context_and_negation_traps():
     tags_delay = N._tag("Fed delays rate cuts as inflation persists")
     assert "dovish" not in tags_delay and "hawkish" in tags_delay
 
+    tags_hyph = N._tag("Traders trim rate-cut bets ahead of inflation report")
+    assert "dovish" not in tags_hyph and "hawkish" in tags_hyph
+
     tags_rec = N._tag("US economy avoids recession as consumer spending holds")
     assert "dovish" not in tags_rec
 

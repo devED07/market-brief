@@ -49,6 +49,9 @@ def test_snapshot_rejects_weekend_gaps_and_uses_5_trading_days():
     assert snap["vs_5d"] is not None
     assert snap["stale_min"] == 5
     assert snap["cached"] is False
+    assert snap["pdh"] is not None and snap["pdl"] is not None
+    assert snap["pdh"] >= snap["pdl"]
+    assert snap["range_used"] is not None
 
 
 def test_snaps_cache_roundtrip_and_ttl(tmp_path, monkeypatch):

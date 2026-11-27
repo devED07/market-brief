@@ -295,7 +295,12 @@ def _asset_pane(key: str, snap: dict, tz, now: datetime) -> str:
     rng_val = f"{ru:.2f}× 5d avg" if ru is not None else "—"
     rng_sub = '<span class="stretched">Stretched</span>' if (ru is not None and ru >= 1.5) else '<span class="na">vs 5-day avg</span>'
 
-    price_sub = '<span class="na">OANDA CFD · live</span>' if snap.get("source") == "oanda" else '<span class="na">~10m delayed</span>'
+    src = snap.get("source")
+    price_sub = (
+        '<span class="na">Twelve Data · live</span>' if src == "twelvedata"
+        else '<span class="na">OANDA CFD · live</span>' if src == "oanda"
+        else '<span class="na">~10m delayed</span>'
+    )
     strip = f"""<div class="ref-strip">
   {_ref_card("Last Price", _num(key, last) if last is not None else "n/a", price_sub)}
   {_ref_card("PDH (Prev High)", _num(key, sl.get("pdh")), _dist(sl.get("pdh"), last))}
@@ -346,12 +351,15 @@ def render(brief: dict) -> str:
     ny_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 9, 30, 16, 0), tz)
     full_sub = _fmt_window(_session_bounds(today_str, "America/New_York", 18, 0, 17, 0, prev_day_open=True), tz)
 
-    using_oanda = any((snaps.get(k) or {}).get("source") == "oanda" for k in ("gold", "us30", "us100"))
-    footer_note = (
-        "Session levels use OANDA 5-minute CFD midpoint candles (XAU_USD, US30_USD, NAS100_USD). Compare exact entry prices against your broker chart."
-        if using_oanda
-        else "Session levels use futures bars (GC=F, YM=F, NQ=F) and lag ~10 minutes. Compare exact entry prices against your broker chart."
-    )
+    sources = {(snaps.get(k) or {}).get("source", "yahoo") for k in ("gold", "us30", "us100") if snaps.get(k)}
+    if sources == {"oanda"}:
+        footer_note = "Session levels use OANDA 5-minute CFD midpoint candles (XAU_USD, US30_USD, NAS100_USD). Compare exact entry prices against your broker chart."
+    elif "twelvedata" in sources:
+        footer_note = f"Session levels use Twelve Data 5-minute spot candles ({syms.get('gold', 'XAU/USD')}) and {'OANDA CFD' if 'oanda' in sources else 'Yahoo futures'} for indices. Compare exact entry prices against your broker chart."
+    elif "oanda" in sources:
+        footer_note = "Session levels use OANDA 5-minute CFD midpoint candles with Yahoo fallback. Compare exact entry prices against your broker chart."
+    else:
+        footer_note = "Session levels use futures bars (GC=F, YM=F, NQ=F) and lag ~10 minutes. Compare exact entry prices against your broker chart."
 
     return f"""<!doctype html>
 <html lang="en"><head>

@@ -40,6 +40,25 @@ OANDA_HOSTS = {
 }
 
 
+def _build_ohlc_series(times: list, opens: list[float], highs: list[float],
+                       lows: list[float], closes: list[float],
+                       source: str, label: str) -> pd.Series:
+    """Build a UTC-sorted Close Series with aligned OHLC wick attrs."""
+    if not times:
+        raise ValueError(f"no {source} data for {label}")
+    idx = pd.to_datetime(times, utc=True)
+    df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes}, index=idx)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    s = df["Close"].dropna()
+    if s.empty:
+        raise ValueError(f"no {source} data for {label}")
+    s.attrs["ohlc_open"] = df["Open"].reindex(s.index).fillna(s)
+    s.attrs["ohlc_high"] = df["High"].reindex(s.index).fillna(s)
+    s.attrs["ohlc_low"] = df["Low"].reindex(s.index).fillna(s)
+    s.attrs["source"] = source
+    return s
+
+
 def fetch_oanda_series(instrument: str, api_key: str, env: str = "practice",
                        count: int = 3000, opener=None) -> pd.Series:
     """5-minute CFD midpoint candles from OANDA v20 REST API, indexed in UTC."""
@@ -70,21 +89,36 @@ def fetch_oanda_series(instrument: str, api_key: str, env: str = "practice",
         highs.append(float(mid["h"]))
         lows.append(float(mid["l"]))
         closes.append(float(mid["c"]))
+    return _build_ohlc_series(times, opens, highs, lows, closes, "oanda", instrument)
 
-    if not times:
-        raise ValueError(f"no OANDA data for {instrument}")
 
-    idx = pd.to_datetime(times, utc=True)
-    df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes}, index=idx)
-    df = df[~df.index.duplicated(keep="last")].sort_index()
-    s = df["Close"].dropna()
-    if s.empty:
-        raise ValueError(f"no OANDA data for {instrument}")
-    s.attrs["ohlc_open"] = df["Open"].reindex(s.index).fillna(s)
-    s.attrs["ohlc_high"] = df["High"].reindex(s.index).fillna(s)
-    s.attrs["ohlc_low"] = df["Low"].reindex(s.index).fillna(s)
-    s.attrs["source"] = "oanda"
-    return s
+def fetch_twelvedata_series(symbol: str, api_key: str, outputsize: int = 3000,
+                            opener=None) -> pd.Series:
+    """5-minute spot/forex candles from Twelve Data /time_series, indexed in UTC."""
+    url = (
+        "https://api.twelvedata.com/time_series"
+        f"?symbol={urllib.parse.quote(symbol, safe='')}"
+        f"&interval=5min&outputsize={outputsize}&timezone=UTC&order=asc"
+        f"&apikey={urllib.parse.quote(api_key, safe='')}"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "market-brief/1.0"})
+    with (opener or urllib.request.urlopen)(req, timeout=20) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    if payload.get("status") == "error":
+        raise ValueError(payload.get("message") or f"Twelve Data error for {symbol}")
+
+    times, opens, highs, lows, closes = [], [], [], [], []
+    for v in payload.get("values") or []:
+        ts = v.get("datetime")
+        if not ts or not all(k in v for k in ("open", "high", "low", "close")):
+            continue
+        times.append(ts)
+        opens.append(float(v["open"]))
+        highs.append(float(v["high"]))
+        lows.append(float(v["low"]))
+        closes.append(float(v["close"]))
+    return _build_ohlc_series(times, opens, highs, lows, closes, "twelvedata", symbol)
 
 
 def fetch_series(symbol: str) -> pd.Series:
@@ -417,19 +451,29 @@ def load_snaps_cache(now: datetime, max_age_min: int = 120, weekend: bool = Fals
 
 def fetch_all(symbols: dict[str, str], now: datetime | None = None,
               oanda_key: str = "", oanda_env: str = "practice",
-              oanda_symbols: dict[str, str] | None = None) -> tuple[dict, dict, list[str]]:
+              oanda_symbols: dict[str, str] | None = None,
+              twelvedata_key: str = "",
+              twelvedata_symbols: dict[str, str] | None = None) -> tuple[dict, dict, list[str]]:
     """Returns (series_by_key, snapshot_by_key, problems)."""
     now = now or datetime.now(timezone.utc)
     series, snaps, problems = {}, {}, []
     for key, symbol in symbols.items():
         s = None
         oanda_sym = (oanda_symbols or {}).get(key, "")
+        td_sym = (twelvedata_symbols or {}).get(key, "")
         if oanda_key and oanda_sym:
             try:
                 s = fetch_oanda_series(oanda_sym, oanda_key, env=oanda_env)
             except Exception as exc:
                 problems.append(
-                    f"{LABELS.get(key, key)} OANDA ({oanda_sym}): {exc.__class__.__name__}, falling back to {symbol}"
+                    f"{LABELS.get(key, key)} OANDA ({oanda_sym}): {exc.__class__.__name__}, falling back"
+                )
+        if s is None and twelvedata_key and td_sym:
+            try:
+                s = fetch_twelvedata_series(td_sym, twelvedata_key)
+            except Exception as exc:
+                problems.append(
+                    f"{LABELS.get(key, key)} Twelve Data ({td_sym}): {exc.__class__.__name__}, falling back to {symbol}"
                 )
         if s is None:
             try:

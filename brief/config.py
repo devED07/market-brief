@@ -33,6 +33,11 @@ class Settings:
     oanda_us30: str = "US30_USD"
     oanda_us100: str = "NAS100_USD"
 
+    twelvedata_api_key: str = ""
+    twelvedata_gold: str = "XAU/USD"
+    twelvedata_us30: str = ""
+    twelvedata_us100: str = ""
+
     fred_key: str = ""
 
     telegram_enabled: bool = False
@@ -87,6 +92,13 @@ def load_settings() -> Settings:
             if val:
                 setattr(s, attr, val)
 
+    if cp.has_section("twelvedata"):
+        td = cp["twelvedata"]
+        s.twelvedata_api_key = (td.get("api_key") or "").strip()
+        for key, attr in (("gold", "twelvedata_gold"), ("us30", "twelvedata_us30"), ("us100", "twelvedata_us100")):
+            if key in td:
+                setattr(s, attr, (td.get(key) or "").strip())
+
     if cp.has_section("fred"):
         s.fred_key = (cp["fred"].get("api_key") or "").strip()
 
@@ -112,6 +124,10 @@ def load_settings() -> Settings:
     env_oanda_env = os.environ.get("OANDA_ENV", "").strip().lower()
     if env_oanda_env in ("practice", "live"):
         s.oanda_env = env_oanda_env
+
+    env_td_key = os.environ.get("TWELVEDATA_API_KEY", "").strip()
+    if env_td_key:
+        s.twelvedata_api_key = env_td_key
 
     DATA_DIR.mkdir(exist_ok=True)
     return s

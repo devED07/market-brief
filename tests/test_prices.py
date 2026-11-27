@@ -157,5 +157,71 @@ def test_fetch_oanda_series_and_fallback(monkeypatch):
     )
     assert snaps["gold"]["source"] == "oanda"
     assert snaps["us30"]["source"] == "yahoo"
-    assert "falling back to YM=F" in problems[0]
+    assert "falling back" in problems[0]
+    assert len(series) == 2
+
+
+def test_fetch_twelvedata_series_and_fallback(monkeypatch):
+    import json
+    import pytest
+
+    class _FakeResp:
+        def __init__(self, body: dict):
+            self._raw = json.dumps(body).encode("utf-8")
+
+        def read(self) -> bytes:
+            return self._raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    seen = {}
+
+    def fake_opener(req, timeout=20):
+        seen["url"] = req.full_url
+        return _FakeResp({
+            "status": "ok",
+            "values": [
+                {"datetime": "2026-11-27 01:00:00", "open": "3650.0", "high": "3666.47", "low": "3648.0", "close": "3660.0"},
+                {"datetime": "2026-11-27 01:05:00", "open": "3660.0", "high": "3662.0", "low": "3640.5", "close": "3655.0"},
+            ],
+        })
+
+    s = P.fetch_twelvedata_series("XAU/USD", "td-key-1", opener=fake_opener)
+    assert "symbol=XAU%2FUSD" in seen["url"]
+    assert "apikey=td-key-1" in seen["url"]
+    assert s.attrs["source"] == "twelvedata"
+    assert float(s.attrs["ohlc_high"].max()) == 3666.47
+    assert float(s.attrs["ohlc_low"].min()) == 3640.5
+
+    def fake_err_opener(req, timeout=20):
+        return _FakeResp({"status": "error", "message": "API key invalid"})
+
+    with pytest.raises(ValueError, match="API key invalid"):
+        P.fetch_twelvedata_series("XAU/USD", "bad", opener=fake_err_opener)
+
+    # fetch_all uses Twelve Data for XAU/USD and falls back to Yahoo if it raises
+    fallback_idx = pd.date_range("2026-11-27T01:00:00Z", periods=3, freq="5min", tz="UTC")
+    fallback_s = pd.Series([50500.0, 50550.0, 50600.0], index=fallback_idx)
+    fallback_s.attrs["source"] = "yahoo"
+
+    def fake_td(sym, api_key, outputsize=3000, opener=None):
+        if sym == "US30":
+            raise RuntimeError("paid only")
+        return s
+
+    monkeypatch.setattr(P, "fetch_twelvedata_series", fake_td)
+    monkeypatch.setattr(P, "fetch_series", lambda sym: fallback_s)
+    series, snaps, problems = P.fetch_all(
+        {"gold": "GC=F", "us30": "YM=F"},
+        now=datetime(2026, 11, 27, 1, 10, tzinfo=timezone.utc),
+        twelvedata_key="td-key-1",
+        twelvedata_symbols={"gold": "XAU/USD", "us30": "US30"},
+    )
+    assert snaps["gold"]["source"] == "twelvedata"
+    assert snaps["us30"]["source"] == "yahoo"
+    assert "Twelve Data (US30)" in problems[0]
     assert len(series) == 2

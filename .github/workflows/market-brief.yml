@@ -9,6 +9,13 @@ name: Market Brief
 # GitHub often skips scheduled weekday runs, which is why the chain exists.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "brief/**"
+      - "main.py"
+      - "settings.ini"
+      - ".github/workflows/market-brief.yml"
   schedule:
     # Times are UTC. :07 and :37 avoid GitHub's busy top of the hour.
     - cron: "7,37 * * * 1-5"
